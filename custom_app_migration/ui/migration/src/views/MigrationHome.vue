@@ -1,5 +1,5 @@
 <template>
-  <div class="max-w-5xl mx-auto px-6 py-10">
+  <div class="max-w-3xl mx-auto px-8 py-12">
     <!-- Hero -->
     <div class="text-center mb-12">
       <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary-50 dark:bg-primary-950 mb-5">

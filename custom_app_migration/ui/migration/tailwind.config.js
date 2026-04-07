@@ -5,6 +5,11 @@ export default {
   theme: {
     extend: {
       colors: {
+        sena: {
+          bg: '#FAF9F5',
+          surface: '#F5F4F0',
+          shell: '#F7F6F2',
+        },
         primary: {
           50: '#eff6ff',
           100: '#dbeafe',
@@ -17,6 +22,18 @@ export default {
           800: '#1e40af',
           900: '#1e3a8a',
         },
+        ink: {
+          primary: '#1e293b',
+          secondary: '#334155',
+          muted: '#64748b',
+          faint: '#94a3b8',
+        },
+      },
+      fontWeight: {
+        normal: '420',
+        medium: '500',
+        semibold: '600',
+        bold: '700',
       },
     },
   },

@@ -1,16 +1,16 @@
 <template>
-  <div class="max-w-4xl mx-auto px-6 py-8">
-    <router-link to="/" class="inline-flex items-center gap-1 text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 mb-6">
-      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-      Back
-    </router-link>
+  <div>
+    <!-- Header stepper -->
+    <Teleport to="header .flex-1" v-if="headerMounted">
+      <StepIndicator :steps="stepLabels" :currentStep="step" @go="goToStep" />
+    </Teleport>
 
-    <StepIndicator :steps="stepLabels" :currentStep="step" @go="goToStep" />
+    <div class="max-w-3xl mx-auto px-8 py-10">
 
     <!-- Step 1: Source -->
     <div v-if="step === 0">
-      <h2 class="text-xl font-bold mb-1">Where is your data?</h2>
-      <p class="text-gray-500 dark:text-gray-400 text-sm mb-6">Choose the system you're migrating from.</p>
+      <h2 class="text-xl font-bold mb-2 text-ink-primary">Where is your data?</h2>
+      <p class="text-ink-muted text-sm mb-8">Choose the system you're migrating from.</p>
 
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
         <SourceCard title="Tally" subtitle="TallyPrime / ERP 9" :selected="source === 'tally'" @select="source = 'tally'" iconBg="bg-blue-50 dark:bg-blue-950">
@@ -439,17 +439,21 @@
         >Done</router-link>
       </div>
     </div>
+
+    </div><!-- /max-w-3xl wrapper -->
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import StepIndicator from '@/components/StepIndicator.vue'
 import SourceCard from '@/components/SourceCard.vue'
 import FileUploadRow from '@/components/FileUploadRow.vue'
 
 const stepLabels = ['Source', 'Target', 'Preview', 'Migrate', 'Validate']
 const step = ref(0)
+const headerMounted = ref(false)
+onMounted(() => { headerMounted.value = !!document.querySelector('header .flex-1') })
 
 // Step 1: Source
 const source = ref('')
