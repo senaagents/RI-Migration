@@ -449,6 +449,7 @@ import { ref, computed, onMounted } from 'vue'
 import StepIndicator from '@/components/StepIndicator.vue'
 import SourceCard from '@/components/SourceCard.vue'
 import FileUploadRow from '@/components/FileUploadRow.vue'
+import { testTallyConnection, fetchTallyData, executeMigration } from '@/services/api.js'
 
 const stepLabels = ['Source', 'Target', 'Preview', 'Migrate', 'Validate']
 const step = ref(0)
@@ -499,11 +500,14 @@ async function testConnection() {
   connectionStatus.value = ''
   connectionError.value = ''
   try {
-    // Simulate connection test (will call real API when backend is ready)
-    await new Promise(r => setTimeout(r, 1500))
-    // Mock success for now
-    connectionStatus.value = 'ok'
-    connectionCompany.value = 'Avinash Industries - Chennai Unit - 2025-26'
+    const result = await testTallyConnection(tallyHost.value, tallyPort.value)
+    if (result.connected) {
+      connectionStatus.value = 'ok'
+      connectionCompany.value = result.company || 'Connected'
+    } else {
+      connectionStatus.value = 'error'
+      connectionError.value = result.error || 'Could not connect to TallyPrime'
+    }
   } catch (e) {
     connectionStatus.value = 'error'
     connectionError.value = e.message || 'Connection failed'
@@ -525,39 +529,22 @@ const canProceedFromTarget = computed(() => {
 async function fetchPreview() {
   fetchingPreview.value = true
   try {
-    // Simulate fetching data preview (will call real API)
-    await new Promise(r => setTimeout(r, 2000))
-    // Mock preview data
+    const result = await fetchTallyData(tallyHost.value, tallyPort.value)
     previewEntities.value = [
-      { key: 'groups', label: 'Account Groups', count: 282, enabled: true, expanded: false, samples: [
-        { name: 'Capital Account' }, { name: 'Current Assets' }, { name: 'Current Liabilities' }, { name: 'Direct Expenses' }, { name: 'Fixed Assets' }
-      ]},
-      { key: 'ledgers', label: 'Ledger Accounts', count: 2943, enabled: true, expanded: false, samples: [
-        { name: 'Cash', parent: 'Cash-in-Hand', balance: 125430 },
-        { name: 'CUB 69472-CA', parent: 'Bank Accounts', balance: -5513.63 },
-        { name: 'HDFC Bank', parent: 'Bank Accounts', balance: 892341 },
-      ]},
-      { key: 'customers', label: 'Customers', count: 153, enabled: true, expanded: false, samples: [
-        { name: 'Bajaj Electricals Ltd' }, { name: 'Havells India Ltd' }, { name: 'Crompton Greaves' },
-      ]},
-      { key: 'suppliers', label: 'Suppliers', count: 1714, enabled: true, expanded: false, samples: [
-        { name: 'Tata Steel Ltd' }, { name: 'JSW Steel' }, { name: 'Hindustan Zinc' },
-      ]},
-      { key: 'items', label: 'Stock Items', count: 168, enabled: true, expanded: false, samples: [
-        { name: 'A300 01.Finished Goods', parent: 'Finished Goods' },
-        { name: 'A300 02.Glass', parent: 'Raw Materials' },
-        { name: 'A300 03.Brass Items', parent: 'Raw Materials' },
-      ]},
-      { key: 'units', label: 'Units of Measure', count: 12, enabled: true, expanded: false, samples: [
-        { name: 'Nos' }, { name: 'Kgs' }, { name: 'Ltrs' },
-      ]},
-      { key: 'godowns', label: 'Warehouses', count: 8, enabled: true, expanded: false, samples: [
-        { name: 'Main Location' }, { name: 'Chennai Warehouse' },
-      ]},
+      { key: 'groups', label: 'Account Groups', count: result.groups_count || 0, enabled: true, expanded: false,
+        samples: (result.sample_accounts || []).slice(0, 5) },
+      { key: 'ledgers', label: 'Ledger Accounts', count: result.ledgers_count || 0, enabled: true, expanded: false,
+        samples: (result.sample_accounts || []).slice(0, 5) },
+      { key: 'customers', label: 'Customers', count: result.customers_count || 0, enabled: true, expanded: false,
+        samples: (result.sample_customers || []).slice(0, 5) },
+      { key: 'suppliers', label: 'Suppliers', count: result.suppliers_count || 0, enabled: true, expanded: false,
+        samples: (result.sample_suppliers || []).slice(0, 5) },
+      { key: 'items', label: 'Stock Items', count: result.stock_items_count || 0, enabled: true, expanded: false,
+        samples: (result.sample_stock || []).slice(0, 5) },
     ]
     step.value = 2
   } catch (e) {
-    alert('Failed to fetch data: ' + e.message)
+    alert('Failed to fetch data: ' + (e.message || e))
   } finally {
     fetchingPreview.value = false
   }
@@ -586,29 +573,43 @@ async function startMigration() {
   const enabledEntities = previewEntities.value.filter(e => e.enabled)
 
   migrationTasks.value = [
-    { label: 'Creating Company', status: 'pending', detail: '' },
-    ...enabledEntities.map(e => ({
-      label: `Importing ${e.label}`,
-      status: 'pending',
-      detail: `${e.count.toLocaleString()} records`,
-    })),
-    { label: 'Setting Opening Balances', status: 'pending', detail: '' },
+    { label: 'Connecting to Tally and importing data', status: 'running', detail: '' },
+  ]
+  migrationLogs.value = [
+    { time: new Date().toLocaleTimeString(), message: 'Starting migration...', level: 'info' },
   ]
 
-  // Simulate migration progress
-  for (let i = 0; i < migrationTasks.value.length; i++) {
-    migrationTasks.value[i].status = 'running'
-    const label = migrationTasks.value[i].label
-    migrationLogs.value.push({ time: new Date().toLocaleTimeString(), message: `Starting: ${label}`, level: 'info' })
-    await new Promise(r => setTimeout(r, 800 + Math.random() * 1200))
-    migrationTasks.value[i].status = 'done'
-    migrationLogs.value.push({ time: new Date().toLocaleTimeString(), message: `Completed: ${label}`, level: 'success' })
-  }
+  try {
+    const result = await executeMigration(
+      tallyHost.value, tallyPort.value,
+      companyName.value, companyAbbr.value,
+      false
+    )
 
-  // Move to validation
-  await new Promise(r => setTimeout(r, 500))
-  validationStats.value = enabledEntities.map(e => ({ label: e.label, value: e.count }))
-  step.value = 4
+    migrationTasks.value[0].status = 'done'
+    migrationLogs.value.push(
+      { time: new Date().toLocaleTimeString(), message: `Migration complete`, level: 'success' }
+    )
+
+    // Build validation stats from result
+    validationStats.value = []
+    if (result.created != null) validationStats.value.push({ label: 'Created', value: result.created })
+    if (result.skipped != null) validationStats.value.push({ label: 'Skipped', value: result.skipped })
+    if (result.errors != null) validationStats.value.push({ label: 'Errors', value: result.errors })
+
+    // Show error details if any
+    if (result.error_details && result.error_details.length) {
+      validationErrors.value = result.error_details.map(e => typeof e === 'string' ? e : JSON.stringify(e))
+    }
+
+    step.value = 4
+  } catch (e) {
+    migrationTasks.value[0].status = 'error'
+    migrationTasks.value[0].detail = e.message || 'Migration failed'
+    migrationLogs.value.push(
+      { time: new Date().toLocaleTimeString(), message: `Error: ${e.message || e}`, level: 'error' }
+    )
+  }
 }
 
 // Step 5: Validation

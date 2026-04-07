@@ -56,14 +56,16 @@ export async function testTallyConnection(host, port) {
   return fn('test_tally_connection', { host, port })
 }
 
-export async function fetchTallyPreview(host, port) {
+export async function fetchTallyData(host, port) {
   const fn = isIframe ? callBridgeAPI : callAPI
-  return fn('fetch_tally_preview', { host, port })
+  return fn('fetch_tally_data', { host, port })
 }
 
-export async function executeMigration(config) {
+export async function executeMigration(host, port, companyName, companyAbbr, dryRun = false) {
   const fn = isIframe ? callBridgeAPI : callAPI
-  return fn('execute_migration', config)
+  return fn('execute_migration', {
+    host, port, company_name: companyName, company_abbr: companyAbbr, dry_run: dryRun,
+  })
 }
 
 export async function getMigrationStatus(migrationId) {
