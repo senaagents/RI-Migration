@@ -461,11 +461,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import StepIndicator from '@/components/StepIndicator.vue'
 import SourceCard from '@/components/SourceCard.vue'
 import FileUploadRow from '@/components/FileUploadRow.vue'
-import { testTallyConnection, fetchTallyData, executeMigration, getTargetCompanies } from '@/services/api.js'
+import { testTallyConnection, fetchTallyData, executeMigration, getMigrationStatus, getTargetCompanies } from '@/services/api.js'
 
 const stepLabels = ['Source', 'Target', 'Preview', 'Migrate', 'Validate']
 const step = ref(0)
@@ -598,23 +598,21 @@ function formatNumber(n) {
 // Step 4: Progress
 const migrationTasks = ref([])
 const migrationLogs = ref([])
+const overallProgress = ref(0)
+let pollInterval = null
 
-const overallProgress = computed(() => {
-  if (!migrationTasks.value.length) return 0
-  const done = migrationTasks.value.filter(t => t.status === 'done').length
-  return Math.round((done / migrationTasks.value.length) * 100)
-})
+function addLog(message, level = 'info') {
+  migrationLogs.value.push({ time: new Date().toLocaleTimeString(), message, level })
+}
 
 async function startMigration() {
   step.value = 3
-  const enabledEntities = previewEntities.value.filter(e => e.enabled)
-
+  overallProgress.value = 0
   migrationTasks.value = [
-    { label: 'Connecting to Tally and importing data', status: 'running', detail: '' },
+    { label: 'Starting migration...', status: 'running', detail: '' },
   ]
-  migrationLogs.value = [
-    { time: new Date().toLocaleTimeString(), message: 'Starting migration...', level: 'info' },
-  ]
+  migrationLogs.value = []
+  addLog('Starting migration...')
 
   try {
     const result = await executeMigration(
@@ -623,31 +621,77 @@ async function startMigration() {
       false
     )
 
-    migrationTasks.value[0].status = 'done'
-    migrationLogs.value.push(
-      { time: new Date().toLocaleTimeString(), message: `Migration complete`, level: 'success' }
-    )
-
-    // Build validation stats from result
-    validationStats.value = []
-    if (result.created != null) validationStats.value.push({ label: 'Created', value: result.created })
-    if (result.skipped != null) validationStats.value.push({ label: 'Skipped', value: result.skipped })
-    if (result.errors != null) validationStats.value.push({ label: 'Errors', value: result.errors })
-
-    // Show error details if any
-    if (result.error_details && result.error_details.length) {
-      validationErrors.value = result.error_details.map(e => typeof e === 'string' ? e : JSON.stringify(e))
+    const jobId = result.job_id
+    if (!jobId) {
+      // Synchronous result (no background job) -- handle directly
+      handleMigrationResult(result)
+      return
     }
 
-    step.value = 4
+    addLog(`Migration job started: ${jobId}`)
+
+    // Poll for progress every 2 seconds
+    pollInterval = setInterval(async () => {
+      try {
+        const status = await getMigrationStatus(jobId)
+
+        overallProgress.value = status.progress || 0
+
+        if (status.current_step) {
+          // Update the task label to show current step
+          migrationTasks.value[0].label = status.current_step
+        }
+
+        if (status.steps && status.steps.length) {
+          migrationTasks.value = status.steps.map(s => ({
+            label: s.label || s,
+            status: s.status || 'pending',
+            detail: s.detail || '',
+          }))
+        }
+
+        if (status.status === 'done') {
+          clearInterval(pollInterval)
+          pollInterval = null
+          addLog('Migration complete!', 'success')
+          handleMigrationResult(status)
+        }
+
+        if (status.status === 'error') {
+          clearInterval(pollInterval)
+          pollInterval = null
+          addLog(`Error: ${status.current_step || 'Unknown error'}`, 'error')
+          migrationTasks.value[0].status = 'error'
+          migrationTasks.value[0].detail = status.current_step || 'Migration failed'
+        }
+      } catch (pollErr) {
+        // Don't stop polling on transient errors
+        console.warn('Poll error:', pollErr)
+      }
+    }, 2000)
   } catch (e) {
     migrationTasks.value[0].status = 'error'
-    migrationTasks.value[0].detail = e.message || 'Migration failed'
-    migrationLogs.value.push(
-      { time: new Date().toLocaleTimeString(), message: `Error: ${e.message || e}`, level: 'error' }
-    )
+    migrationTasks.value[0].detail = e.message || 'Failed to start migration'
+    addLog(`Error: ${e.message || e}`, 'error')
   }
 }
+
+function handleMigrationResult(result) {
+  validationStats.value = []
+  if (result.created != null) validationStats.value.push({ label: 'Created', value: result.created })
+  if (result.skipped != null) validationStats.value.push({ label: 'Skipped', value: result.skipped })
+  if (result.errors != null) validationStats.value.push({ label: 'Errors', value: result.errors })
+
+  if (result.error_details && result.error_details.length) {
+    validationErrors.value = result.error_details.map(e => typeof e === 'string' ? e : JSON.stringify(e))
+  }
+
+  step.value = 4
+}
+
+onBeforeUnmount(() => {
+  if (pollInterval) clearInterval(pollInterval)
+})
 
 // Step 5: Validation
 const validationStats = ref([])

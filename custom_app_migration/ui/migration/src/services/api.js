@@ -73,9 +73,9 @@ export async function executeMigration(host, port, companyName, companyAbbr, dry
   })
 }
 
-export async function getMigrationStatus(migrationId) {
+export async function getMigrationStatus(jobId) {
   const fn = isIframe ? callBridgeAPI : callAPI
-  return fn('get_migration_status', { migration_id: migrationId })
+  return fn('get_migration_status', { job_id: jobId })
 }
 
 export async function getMigrationHistory() {
