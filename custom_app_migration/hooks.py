@@ -4,3 +4,6 @@ app_publisher = "Sena"
 app_description = "AI-powered data migration agent-app"
 app_email = "hello@senaagents.com"
 app_license = "MIT"
+
+# Whitelisted API methods
+# accessible via /api/method/custom_app_migration.custom_app_migration.custom_app_migration.api.<method>
