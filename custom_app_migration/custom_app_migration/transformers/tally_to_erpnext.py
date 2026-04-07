@@ -42,22 +42,27 @@ _PREFIX_ROOT_TYPE = {
 
 # Tally UOM → ERPNext UOM mapping
 UOM_MAP = {
-	"Nos": "Nos",
-	"Nos.": "Nos",
-	"nos": "Nos",
-	"Kgs": "Kg",
-	"Kgs.": "Kg",
-	"kgs": "Kg",
-	"Mtr.": "Meter",
-	"Mtrs": "Meter",
-	"Mtr": "Meter",
-	"Sets": "Set",
-	"set": "Set",
-	"Pcs": "Nos",
-	"pcs": "Nos",
-	"rol": "Roll",
-	"roll": "Roll",
-	"Ltr": "Liter",
+	"Nos": "Nos", "Nos.": "Nos", "nos": "Nos", "NO": "Nos", "No": "Nos",
+	"Kgs": "Kg", "Kgs.": "Kg", "kgs": "Kg", "KG": "Kg", "Kg": "Kg",
+	"Mtr.": "Meter", "Mtrs": "Meter", "Mtr": "Meter",
+	"Sets": "Set", "set": "Set", "Set": "Set",
+	"Pcs": "Nos", "pcs": "Nos", "PC": "Nos", "Pc": "Nos",
+	"Bags": "Nos", "Bag": "Nos",
+	"Bottle": "Nos",
+	"Boxes": "Nos", "Box": "Nos",
+	"day": "Nos", "Days": "Nos",
+	"Dzn": "Nos",
+	"hr": "Nos", "Hour": "Nos",
+	"ld": "Nos",
+	"Litres": "Nos", "Ltr": "Nos", "Liter": "Nos",
+	"MBPS": "Nos",
+	"min": "Nos",
+	"Mth": "Nos",
+	"Packet": "Nos", "Pack": "Nos",
+	"rol": "Nos", "role": "Nos", "roll": "Nos", "Roll": "Nos",
+	"Sq.feet": "Nos", "Sqm.": "Nos",
+	"Ton": "Nos", "Tonne": "Nos",
+	"Not Applicable": "Nos",
 }
 
 
@@ -305,6 +310,28 @@ def transform_items(stock_items):
 	return items
 
 
+def transform_cost_centres(cost_centres, company_name, company_abbr):
+	"""Transform Tally Cost Centres into ERPNext Cost Center dicts.
+
+	Skips payroll/employee entries — those are employee names in Tally, not cost centres.
+	"""
+	result = []
+	for cc in cost_centres:
+		if cc.get("for_payroll") or cc.get("is_employee_group"):
+			continue
+		name = cc.get("name", "").strip()
+		if not name:
+			continue
+		result.append({
+			"doctype": "Cost Center",
+			"cost_center_name": name,
+			"company": company_name,
+			"parent_cost_center": f"{company_name} - {company_abbr}",
+			"is_group": 0,
+		})
+	return result
+
+
 def transform_warehouses(godowns, company_name):
 	"""Transform Tally Godowns into ERPNext Warehouse dicts."""
 	warehouses = []
@@ -343,4 +370,267 @@ def transform_all(tally_data, company_name, company_abbr):
 		"item_groups": transform_item_groups(stock_groups),
 		"items": transform_items(stock_items),
 		"warehouses": transform_warehouses(godowns, company_name),
+	}
+
+
+# ---------------------------------------------------------------------------
+# Voucher transforms
+# ---------------------------------------------------------------------------
+
+# Maps Tally base voucher types to ERPNext doctypes
+_VCH_TYPE_TO_DOCTYPE = {
+	"Sales": "Sales Invoice",
+	"Purchase": "Purchase Invoice",
+	"Credit Note": "Sales Invoice",  # is_return=1
+	"Debit Note": "Purchase Invoice",  # is_return=1
+	"Receipt": "Payment Entry",
+	"Payment": "Payment Entry",
+	"Journal": "Journal Entry",
+	"Contra": "Journal Entry",
+}
+
+
+def transform_vouchers(vouchers, voucher_types, company_name, company_abbr):
+	"""Transform parsed Tally vouchers into ERPNext document dicts.
+
+	Args:
+		vouchers: List of voucher dicts from parse_day_book().
+		voucher_types: List of voucher type dicts from parse_collection('VoucherType').
+		company_name: ERPNext company name.
+		company_abbr: ERPNext company abbreviation.
+
+	Returns:
+		dict with keys: sales_invoices, purchase_invoices, payment_entries, journal_entries.
+		Each value is a list of ERPNext doc dicts.
+	"""
+	from custom_app_migration.custom_app_migration.parsers.tally import resolve_voucher_base_type
+
+	result = {
+		"sales_invoices": [],
+		"purchase_invoices": [],
+		"payment_entries": [],
+		"journal_entries": [],
+	}
+
+	for vch in vouchers:
+		if vch.get("is_cancelled") or vch.get("is_optional"):
+			continue
+
+		base_type = resolve_voucher_base_type(vch["vch_type"], voucher_types)
+
+		if base_type in ("Sales", "Credit Note"):
+			doc = _transform_sales_invoice(vch, company_name, company_abbr, is_return=(base_type == "Credit Note"))
+			if doc:
+				result["sales_invoices"].append(doc)
+		elif base_type in ("Purchase", "Debit Note"):
+			doc = _transform_purchase_invoice(vch, company_name, company_abbr, is_return=(base_type == "Debit Note"))
+			if doc:
+				result["purchase_invoices"].append(doc)
+		elif base_type in ("Receipt", "Payment"):
+			doc = _transform_payment_entry(vch, company_name, company_abbr, base_type)
+			if doc:
+				result["payment_entries"].append(doc)
+		elif base_type in ("Journal", "Contra"):
+			doc = _transform_journal_entry(vch, company_name, company_abbr)
+			if doc:
+				result["journal_entries"].append(doc)
+
+	return result
+
+
+def _account_for_ledger(ledger_name, company_abbr):
+	"""Build the ERPNext account name from a Tally ledger name."""
+	return f"{ledger_name} - {company_abbr}"
+
+
+def _extract_tax_rows(ledger_entries, company_abbr):
+	"""Extract tax ledger entries (non-party, non-rounding) as ERPNext tax rows."""
+	taxes = []
+	for le in ledger_entries:
+		if le.get("is_party_ledger"):
+			continue
+		if le.get("is_deemed_positive"):
+			continue
+		ledger = le.get("ledger", "")
+		amount = le.get("amount", 0)
+		tax_rate = le.get("tax_rate", 0)
+		# Skip zero-amount entries and tiny rounding entries
+		if abs(amount) < 1.0:
+			continue
+		taxes.append({
+			"charge_type": "Actual",
+			"account_head": _account_for_ledger(ledger, company_abbr),
+			"tax_amount": amount,
+			"description": ledger,
+			"_tally_rate": tax_rate,
+		})
+	return taxes
+
+
+def _transform_sales_invoice(vch, company_name, company_abbr, is_return=False):
+	"""Transform a Sales/Credit Note voucher into an ERPNext Sales Invoice dict."""
+	if not vch.get("inventory_entries"):
+		return None
+
+	items = []
+	for inv in vch["inventory_entries"]:
+		uom = UOM_MAP.get(inv.get("uom", "Nos"), inv.get("uom") or "Nos")
+		items.append({
+			"item_code": inv["item"],
+			"item_name": inv["item"],
+			"qty": abs(inv.get("qty", 0)),
+			"rate": abs(inv.get("rate", 0)),
+			"amount": abs(inv.get("amount", 0)),
+			"uom": uom,
+			"gst_hsn_code": inv.get("hsn", ""),
+		})
+
+	if not items:
+		return None
+
+	taxes = _extract_tax_rows(vch.get("ledger_entries", []), company_abbr)
+
+	return {
+		"doctype": "Sales Invoice",
+		"company": company_name,
+		"customer": vch.get("party", ""),
+		"posting_date": vch.get("date", ""),
+		"due_date": vch.get("date", ""),
+		"is_return": 1 if is_return else 0,
+		"items": items,
+		"taxes": taxes,
+		"remarks": vch.get("narration", ""),
+		"place_of_supply": vch.get("place_of_supply", ""),
+		"_tally_vch_type": vch.get("vch_type", ""),
+		"_tally_vch_number": vch.get("number", ""),
+		"_tally_party_gstin": vch.get("party_gstin", ""),
+	}
+
+
+def _transform_purchase_invoice(vch, company_name, company_abbr, is_return=False):
+	"""Transform a Purchase/Debit Note voucher into an ERPNext Purchase Invoice dict."""
+	if not vch.get("inventory_entries"):
+		return None
+
+	items = []
+	for inv in vch["inventory_entries"]:
+		uom = UOM_MAP.get(inv.get("uom", "Nos"), inv.get("uom") or "Nos")
+		items.append({
+			"item_code": inv["item"],
+			"item_name": inv["item"],
+			"qty": abs(inv.get("qty", 0)),
+			"rate": abs(inv.get("rate", 0)),
+			"amount": abs(inv.get("amount", 0)),
+			"uom": uom,
+			"gst_hsn_code": inv.get("hsn", ""),
+		})
+
+	if not items:
+		return None
+
+	taxes = _extract_tax_rows(vch.get("ledger_entries", []), company_abbr)
+
+	return {
+		"doctype": "Purchase Invoice",
+		"company": company_name,
+		"supplier": vch.get("party", ""),
+		"posting_date": vch.get("date", ""),
+		"due_date": vch.get("date", ""),
+		"is_return": 1 if is_return else 0,
+		"items": items,
+		"taxes": taxes,
+		"remarks": vch.get("narration", ""),
+		"_tally_vch_type": vch.get("vch_type", ""),
+		"_tally_vch_number": vch.get("number", ""),
+		"_tally_party_gstin": vch.get("party_gstin", ""),
+	}
+
+
+def _transform_payment_entry(vch, company_name, company_abbr, base_type):
+	"""Transform a Receipt/Payment voucher into an ERPNext Payment Entry dict."""
+	ledger_entries = vch.get("ledger_entries", [])
+	if not ledger_entries:
+		return None
+
+	# In Tally Receipt/Payment vouchers, one side is bank/cash (is_deemed_positive=Yes
+	# for Receipt), the other is the party/income/expense ledger.
+	bank_ledger = ""
+	bank_amount = 0.0
+	party_ledger = ""
+	party_amount = 0.0
+	references = []
+
+	for le in ledger_entries:
+		if le.get("is_deemed_positive"):
+			bank_ledger = le["ledger"]
+			bank_amount = abs(le.get("amount", 0))
+		else:
+			party_ledger = le["ledger"]
+			party_amount = abs(le.get("amount", 0))
+			# Collect bill references for reconciliation
+			for ba in le.get("bill_allocations", []):
+				references.append({
+					"reference_name": ba.get("name", ""),
+					"reference_type": ba.get("type", ""),
+					"allocated_amount": abs(ba.get("amount", 0)),
+				})
+
+	# Determine payment type
+	if base_type == "Receipt":
+		payment_type = "Receive"
+	else:
+		payment_type = "Pay"
+
+	return {
+		"doctype": "Payment Entry",
+		"company": company_name,
+		"payment_type": payment_type,
+		"party_type": "Customer" if base_type == "Receipt" else "Supplier",
+		"party": party_ledger,
+		"posting_date": vch.get("date", ""),
+		"paid_from": _account_for_ledger(party_ledger if payment_type == "Receive" else bank_ledger, company_abbr),
+		"paid_to": _account_for_ledger(bank_ledger if payment_type == "Receive" else party_ledger, company_abbr),
+		"paid_amount": bank_amount or party_amount,
+		"received_amount": bank_amount or party_amount,
+		"reference_no": vch.get("number", ""),
+		"reference_date": vch.get("date", ""),
+		"remarks": vch.get("narration", ""),
+		"references": references,
+		"_tally_vch_type": vch.get("vch_type", ""),
+		"_tally_vch_number": vch.get("number", ""),
+		"_tally_bank_ledger": bank_ledger,
+	}
+
+
+def _transform_journal_entry(vch, company_name, company_abbr):
+	"""Transform a Journal/Contra voucher into an ERPNext Journal Entry dict."""
+	ledger_entries = vch.get("ledger_entries", [])
+	if not ledger_entries:
+		return None
+
+	rows = []
+	for le in ledger_entries:
+		amount = le.get("amount", 0)
+		row = {
+			"account": _account_for_ledger(le["ledger"], company_abbr),
+		}
+		# Tally: negative = debit. ERPNext JE: separate debit/credit fields.
+		if amount < 0:
+			row["debit_in_account_currency"] = abs(amount)
+		else:
+			row["credit_in_account_currency"] = amount
+		rows.append(row)
+
+	if not rows:
+		return None
+
+	return {
+		"doctype": "Journal Entry",
+		"company": company_name,
+		"posting_date": vch.get("date", ""),
+		"voucher_type": "Journal Entry",
+		"accounts": rows,
+		"remark": vch.get("narration", ""),
+		"_tally_vch_type": vch.get("vch_type", ""),
+		"_tally_vch_number": vch.get("number", ""),
 	}

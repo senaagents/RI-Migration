@@ -134,9 +134,42 @@ class TallyClient:
 		xml = self._build_report_xml("Stock Summary", explode=False)
 		return self._post(xml)
 
-	def get_day_book(self, from_date=None, to_date=None):
-		"""Fetch the 'Day Book' report (all vouchers/transactions)."""
-		xml = self._build_report_xml("Day Book", explode=False)
+	def get_day_book(self, from_date=None, to_date=None, company=None):
+		"""Fetch the 'Day Book' report (all vouchers/transactions).
+
+		Args:
+			from_date: Start date as YYYYMMDD string (e.g. '20260401').
+			to_date: End date as YYYYMMDD string (e.g. '20270331').
+			company: Tally company name. If None, uses the active company.
+		"""
+		static_vars = '<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>'
+		if from_date:
+			static_vars += f'<SVFROMDATE>{from_date}</SVFROMDATE>'
+		if to_date:
+			static_vars += f'<SVTODATE>{to_date}</SVTODATE>'
+		if company:
+			static_vars += f'<SVCURRENTCOMPANY>{company}</SVCURRENTCOMPANY>'
+		xml = (
+			"<ENVELOPE>"
+			"<HEADER>"
+			"<VERSION>1</VERSION>"
+			"<TALLYREQUEST>Export</TALLYREQUEST>"
+			"<TYPE>Data</TYPE>"
+			"<ID>Day Book</ID>"
+			"</HEADER>"
+			"<BODY><DESC><STATICVARIABLES>"
+			f"{static_vars}"
+			"</STATICVARIABLES></DESC></BODY>"
+			"</ENVELOPE>"
+		)
+		return self._post(xml)
+
+	def get_stock_item_balances(self):
+		"""Fetch Stock Items with closing balance, rate, and value."""
+		xml = self._build_collection_xml(
+			"StockItemBalances", "Stock Item",
+			["Name", "Parent", "BaseUnits", "ClosingBalance", "ClosingRate", "ClosingValue"],
+		)
 		return self._post(xml)
 
 	def get_collection(self, object_type, fields=None):
