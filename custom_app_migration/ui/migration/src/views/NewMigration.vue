@@ -27,75 +27,217 @@
         </SourceCard>
       </div>
 
-      <!-- Tally connection options -->
-      <div v-if="source === 'tally'" class="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
-        <h3 class="font-semibold text-sm mb-4">Tally Connection</h3>
+      <!-- Tally input methods -->
+      <div v-if="source === 'tally'" class="space-y-3">
+        <p class="text-xs text-gray-400 dark:text-gray-500 mb-1">Not sure which to choose? Use "Upload Tally Export" -- it's the simplest option.</p>
 
-        <div class="flex gap-3 mb-5">
-          <button
-            v-for="opt in ['live', 'upload']"
-            :key="opt"
-            @click="tallyMode = opt"
-            :class="[
-              'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
-              tallyMode === opt
-                ? 'bg-primary-500 text-white'
-                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-            ]"
-          >
-            {{ opt === 'live' ? 'Live Server (XML API)' : 'Upload XML Export' }}
+        <!-- Method 1: Upload XML (Recommended) -->
+        <div
+          :class="['rounded-xl border-2 transition-all overflow-hidden', tallyMode === 'xml' ? 'border-primary-500 bg-white dark:bg-gray-900' : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900']"
+        >
+          <button @click="tallyMode = 'xml'" class="w-full text-left px-5 py-4 flex items-start gap-3">
+            <div class="flex-shrink-0 mt-0.5">
+              <div :class="['w-5 h-5 rounded-full border-2 flex items-center justify-center', tallyMode === 'xml' ? 'border-primary-500' : 'border-gray-300 dark:border-gray-600']">
+                <div v-if="tallyMode === 'xml'" class="w-2.5 h-2.5 rounded-full bg-primary-500" />
+              </div>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="font-semibold text-sm">Upload Tally Export</span>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">Recommended</span>
+              </div>
+              <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Export your data from TallyPrime as XML files and upload them here. No setup required.</p>
+            </div>
           </button>
-        </div>
 
-        <!-- Live server -->
-        <div v-if="tallyMode === 'live'" class="space-y-4">
-          <div class="flex gap-3">
-            <div class="flex-1">
-              <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Host / IP Address</label>
-              <input
-                v-model="tallyHost"
-                type="text"
-                placeholder="10.211.55.3"
-                class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-              />
-            </div>
-            <div class="w-28">
-              <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Port</label>
-              <input
-                v-model.number="tallyPort"
-                type="number"
-                placeholder="9000"
-                class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-              />
-            </div>
-          </div>
-          <div class="flex items-center gap-3">
-            <button
-              @click="testConnection"
-              :disabled="testingConnection || !tallyHost"
-              class="px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg text-sm font-medium hover:bg-gray-700 dark:hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {{ testingConnection ? 'Testing...' : 'Test Connection' }}
+          <div v-if="tallyMode === 'xml'" class="px-5 pb-5 space-y-4">
+            <!-- Instructions -->
+            <button @click="showXmlInstructions = !showXmlInstructions" class="flex items-center gap-1.5 text-xs font-medium text-primary-500 hover:text-primary-600">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              {{ showXmlInstructions ? 'Hide instructions' : 'How do I export from TallyPrime?' }}
             </button>
-            <span v-if="connectionStatus === 'ok'" class="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400">
-              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-              Connected &middot; {{ connectionCompany }}
-            </span>
-            <span v-else-if="connectionStatus === 'error'" class="flex items-center gap-1.5 text-sm text-red-500">
-              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              {{ connectionError }}
-            </span>
+            <div v-if="showXmlInstructions" class="bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900 rounded-lg p-4">
+              <ol class="space-y-2 text-xs text-gray-600 dark:text-gray-300">
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">1</span><span>Open your company in TallyPrime</span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">2</span><span>Press <kbd class="px-1 py-0.5 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 font-mono text-[10px]">Alt+E</kbd> (or click E:Export in the top menu)</span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">3</span><span>Select <strong>Masters</strong> then <strong>All Masters</strong></span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">4</span><span>Choose format: <strong>XML (Data Interchange)</strong></span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">5</span><span>Choose a location to save (e.g. Desktop) and click Export</span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">6</span><span>Go back to Gateway of Tally</span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">7</span><span>Press <kbd class="px-1 py-0.5 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 font-mono text-[10px]">Alt+E</kbd> again</span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">8</span><span>Select <strong>Vouchers/Transactions</strong> then <strong>All Vouchers</strong></span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">9</span><span>Choose format: <strong>XML (Data Interchange)</strong> and save</span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">10</span><span>Upload both files below</span></li>
+              </ol>
+            </div>
+
+            <!-- Upload zones -->
+            <div class="space-y-3">
+              <div>
+                <label
+                  :class="['flex items-center gap-3 p-4 border-2 border-dashed rounded-xl cursor-pointer transition-colors', mastersFile ? 'border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/30' : 'border-gray-300 dark:border-gray-700 hover:border-primary-400']"
+                >
+                  <div class="flex-shrink-0">
+                    <svg v-if="mastersFile" class="w-6 h-6 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                    <svg v-else class="w-6 h-6 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p v-if="mastersFile" class="text-sm font-medium text-green-700 dark:text-green-300 truncate">{{ mastersFile.name }}</p>
+                    <p v-else class="text-sm text-gray-500 dark:text-gray-400">Drop your <strong>Masters</strong> XML file here or click to browse</p>
+                    <p v-if="mastersFile" class="text-xs text-green-600 dark:text-green-400">{{ formatFileSize(mastersFile.size) }}</p>
+                  </div>
+                  <input type="file" accept=".xml" class="hidden" @change="e => mastersFile = e.target.files?.[0] || null" />
+                </label>
+              </div>
+              <div>
+                <label
+                  :class="['flex items-center gap-3 p-4 border-2 border-dashed rounded-xl cursor-pointer transition-colors', vouchersFile ? 'border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/30' : 'border-gray-300 dark:border-gray-700 hover:border-primary-400']"
+                >
+                  <div class="flex-shrink-0">
+                    <svg v-if="vouchersFile" class="w-6 h-6 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                    <svg v-else class="w-6 h-6 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p v-if="vouchersFile" class="text-sm font-medium text-green-700 dark:text-green-300 truncate">{{ vouchersFile.name }}</p>
+                    <p v-else class="text-sm text-gray-500 dark:text-gray-400">Drop your <strong>Vouchers</strong> XML file here or click to browse</p>
+                    <p v-if="vouchersFile" class="text-xs text-green-600 dark:text-green-400">{{ formatFileSize(vouchersFile.size) }}</p>
+                  </div>
+                  <input type="file" accept=".xml" class="hidden" @change="e => vouchersFile = e.target.files?.[0] || null" />
+                </label>
+                <p class="text-[11px] text-gray-400 dark:text-gray-500 mt-1.5 ml-1">Vouchers file is optional -- you can migrate master data first and add transactions later.</p>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- Upload mode -->
-        <div v-else class="space-y-3">
-          <label class="flex flex-col items-center justify-center p-8 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl cursor-pointer hover:border-primary-400 transition-colors">
-            <svg class="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            <span class="text-sm text-gray-500 dark:text-gray-400">Drop XML file here or click to browse</span>
-            <input type="file" accept=".xml" class="hidden" @change="handleFileUpload" />
-          </label>
-          <p v-if="uploadedFile" class="text-sm text-green-600 dark:text-green-400">Loaded: {{ uploadedFile.name }}</p>
+        <!-- Method 2: Live Server -->
+        <div
+          :class="['rounded-xl border-2 transition-all overflow-hidden', tallyMode === 'live' ? 'border-primary-500 bg-white dark:bg-gray-900' : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900']"
+        >
+          <button @click="tallyMode = 'live'" class="w-full text-left px-5 py-4 flex items-start gap-3">
+            <div class="flex-shrink-0 mt-0.5">
+              <div :class="['w-5 h-5 rounded-full border-2 flex items-center justify-center', tallyMode === 'live' ? 'border-primary-500' : 'border-gray-300 dark:border-gray-600']">
+                <div v-if="tallyMode === 'live'" class="w-2.5 h-2.5 rounded-full bg-primary-500" />
+              </div>
+            </div>
+            <div class="flex-1 min-w-0">
+              <span class="font-semibold text-sm">Live Server Connection</span>
+              <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Connect directly to TallyPrime running on your computer or network. Real-time data pull.</p>
+            </div>
+          </button>
+
+          <div v-if="tallyMode === 'live'" class="px-5 pb-5 space-y-4">
+            <!-- Instructions -->
+            <button @click="showLiveInstructions = !showLiveInstructions" class="flex items-center gap-1.5 text-xs font-medium text-primary-500 hover:text-primary-600">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              {{ showLiveInstructions ? 'Hide instructions' : 'How do I set this up?' }}
+            </button>
+            <div v-if="showLiveInstructions" class="bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900 rounded-lg p-4">
+              <ol class="space-y-2 text-xs text-gray-600 dark:text-gray-300">
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">1</span><span>Open TallyPrime with your company loaded</span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">2</span><span>Press <kbd class="px-1 py-0.5 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 font-mono text-[10px]">F1</kbd> (Help) then go to <strong>Settings</strong> then <strong>Connectivity</strong></span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">3</span><span>Set <strong>"TallyPrime acts as"</strong> to <strong>"Both"</strong></span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">4</span><span>Note the <strong>Port number</strong> (default: 9000)</span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">5</span><span>Press <kbd class="px-1 py-0.5 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 font-mono text-[10px]">Ctrl+A</kbd> to save</span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">6</span><span>Find your IP address: press <kbd class="px-1 py-0.5 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 font-mono text-[10px]">Win+R</kbd>, type <code class="font-mono text-[10px]">cmd</code>, press Enter, then type <code class="font-mono text-[10px]">ipconfig</code></span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">7</span><span>Look for <strong>"IPv4 Address"</strong> (e.g. 192.168.1.100) and enter it below</span></li>
+              </ol>
+            </div>
+
+            <!-- Connection inputs -->
+            <div class="flex gap-3">
+              <div class="flex-1">
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">TallyPrime IP Address</label>
+                <input
+                  v-model="tallyHost"
+                  type="text"
+                  placeholder="e.g. 192.168.1.100"
+                  class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+              </div>
+              <div class="w-28">
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Port</label>
+                <input
+                  v-model.number="tallyPort"
+                  type="number"
+                  placeholder="9000"
+                  class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <button
+                @click="testConnection"
+                :disabled="testingConnection || !tallyHost"
+                class="px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg text-sm font-medium hover:bg-gray-700 dark:hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {{ testingConnection ? 'Testing...' : 'Test Connection' }}
+              </button>
+              <span v-if="connectionStatus === 'ok'" class="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                Connected &middot; {{ connectionCompany }}
+              </span>
+              <span v-else-if="connectionStatus === 'error'" class="flex items-center gap-1.5 text-sm text-red-500">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                {{ connectionError }}
+              </span>
+            </div>
+
+            <!-- Troubleshooting tips on error -->
+            <div v-if="connectionStatus === 'error'" class="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+              <p class="text-xs font-medium text-amber-700 dark:text-amber-300 mb-2">Troubleshooting:</p>
+              <ul class="space-y-1 text-xs text-amber-600 dark:text-amber-400">
+                <li class="flex gap-1.5"><span>-</span><span>Make sure TallyPrime is open with your company loaded</span></li>
+                <li class="flex gap-1.5"><span>-</span><span>Check that "TallyPrime acts as" is set to "Both" in settings</span></li>
+                <li class="flex gap-1.5"><span>-</span><span>Make sure no firewall is blocking port {{ tallyPort }}</span></li>
+                <li class="flex gap-1.5"><span>-</span><span>If TallyPrime is on a different computer, both must be on the same network</span></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Method 3: Upload Excel -->
+        <div
+          :class="['rounded-xl border-2 transition-all overflow-hidden', tallyMode === 'excel' ? 'border-primary-500 bg-white dark:bg-gray-900' : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900']"
+        >
+          <button @click="tallyMode = 'excel'" class="w-full text-left px-5 py-4 flex items-start gap-3">
+            <div class="flex-shrink-0 mt-0.5">
+              <div :class="['w-5 h-5 rounded-full border-2 flex items-center justify-center', tallyMode === 'excel' ? 'border-primary-500' : 'border-gray-300 dark:border-gray-600']">
+                <div v-if="tallyMode === 'excel'" class="w-2.5 h-2.5 rounded-full bg-primary-500" />
+              </div>
+            </div>
+            <div class="flex-1 min-w-0">
+              <span class="font-semibold text-sm">Upload Excel Exports</span>
+              <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Export individual reports from TallyPrime as Excel files. Good if XML export isn't available.</p>
+            </div>
+          </button>
+
+          <div v-if="tallyMode === 'excel'" class="px-5 pb-5 space-y-4">
+            <!-- Instructions -->
+            <button @click="showExcelInstructions = !showExcelInstructions" class="flex items-center gap-1.5 text-xs font-medium text-primary-500 hover:text-primary-600">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              {{ showExcelInstructions ? 'Hide instructions' : 'How do I export Excel files?' }}
+            </button>
+            <div v-if="showExcelInstructions" class="bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900 rounded-lg p-4">
+              <ol class="space-y-2 text-xs text-gray-600 dark:text-gray-300">
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">1</span><span>Open your company in TallyPrime</span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">2</span><span>Go to <strong>Chart of Accounts</strong></span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">3</span><span>Press <kbd class="px-1 py-0.5 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 font-mono text-[10px]">Ctrl+E</kbd> and choose Format: <strong>Excel</strong>, then Save</span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">4</span><span>Go to Gateway then <strong>Stock Summary</strong>, press <kbd class="px-1 py-0.5 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 font-mono text-[10px]">Ctrl+E</kbd> and Save as Excel</span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">5</span><span>Go to <strong>Display More Reports</strong> then <strong>Trial Balance</strong>, export as Excel</span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">6</span><span>Upload the files below</span></li>
+              </ol>
+            </div>
+
+            <!-- File uploads -->
+            <div class="space-y-2">
+              <FileUploadRow label="Chart of Accounts" accept=".xlsx,.xls" required :file="excelCoA" @change="excelCoA = $event" />
+              <FileUploadRow label="Stock Summary" accept=".xlsx,.xls" :file="excelStock" @change="excelStock = $event" />
+              <FileUploadRow label="Trial Balance" accept=".xlsx,.xls" :file="excelTrial" @change="excelTrial = $event" />
+              <FileUploadRow label="Day Book" accept=".xlsx,.xls" :file="excelDayBook" @change="excelDayBook = $event" />
+            </div>
+            <p class="text-[11px] text-gray-400 dark:text-gray-500 ml-1">Upload at least the Chart of Accounts. Other files help with a more complete migration.</p>
+          </div>
         </div>
       </div>
 
@@ -304,26 +446,49 @@
 import { ref, computed } from 'vue'
 import StepIndicator from '@/components/StepIndicator.vue'
 import SourceCard from '@/components/SourceCard.vue'
+import FileUploadRow from '@/components/FileUploadRow.vue'
 
 const stepLabels = ['Source', 'Target', 'Preview', 'Migrate', 'Validate']
 const step = ref(0)
 
 // Step 1: Source
 const source = ref('')
-const tallyMode = ref('live')
+const tallyMode = ref('xml')
+
+// XML upload mode
+const mastersFile = ref(null)
+const vouchersFile = ref(null)
+const showXmlInstructions = ref(false)
+
+// Live server mode
 const tallyHost = ref('')
 const tallyPort = ref(9000)
 const testingConnection = ref(false)
 const connectionStatus = ref('')
 const connectionCompany = ref('')
 const connectionError = ref('')
-const uploadedFile = ref(null)
+const showLiveInstructions = ref(false)
+
+// Excel upload mode
+const excelCoA = ref(null)
+const excelStock = ref(null)
+const excelTrial = ref(null)
+const excelDayBook = ref(null)
+const showExcelInstructions = ref(false)
 
 const canProceedFromSource = computed(() => {
   if (source.value !== 'tally') return false
+  if (tallyMode.value === 'xml') return !!mastersFile.value
   if (tallyMode.value === 'live') return connectionStatus.value === 'ok'
-  return !!uploadedFile.value
+  if (tallyMode.value === 'excel') return !!excelCoA.value
+  return false
 })
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / 1048576).toFixed(1) + ' MB'
+}
 
 async function testConnection() {
   testingConnection.value = true
@@ -341,11 +506,6 @@ async function testConnection() {
   } finally {
     testingConnection.value = false
   }
-}
-
-function handleFileUpload(event) {
-  const file = event.target.files?.[0]
-  if (file) uploadedFile.value = file
 }
 
 // Step 2: Target
