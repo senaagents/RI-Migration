@@ -51,6 +51,11 @@ function callBridgeAPI(method, params = {}) {
 
 const isIframe = window.self !== window.top
 
+export async function getTargetCompanies() {
+  const fn = isIframe ? callBridgeAPI : callAPI
+  return fn('get_target_companies')
+}
+
 export async function testTallyConnection(host, port) {
   const fn = isIframe ? callBridgeAPI : callAPI
   return fn('test_tally_connection', { host, port })

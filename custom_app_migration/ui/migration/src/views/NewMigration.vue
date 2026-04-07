@@ -252,11 +252,11 @@
 
     <!-- Step 2: Target -->
     <div v-if="step === 1">
-      <h2 class="text-xl font-bold mb-1">Where should the data go?</h2>
-      <p class="text-gray-500 dark:text-gray-400 text-sm mb-6">Choose the target agent-app.</p>
+      <h2 class="text-xl font-bold mb-2 text-ink-primary">Where should the data go?</h2>
+      <p class="text-ink-muted text-sm mb-8">Choose the target agent-app and company.</p>
 
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-8">
-        <SourceCard title="SenaERP" subtitle="Accounting, Inventory, CRM" :selected="target === 'erpnext'" @select="target = 'erpnext'" iconBg="bg-blue-50 dark:bg-blue-950">
+        <SourceCard title="SenaERP" subtitle="Accounting, Inventory, CRM" :selected="target === 'erpnext'" @select="selectTarget('erpnext')" iconBg="bg-blue-50 dark:bg-blue-950">
           <template #icon><svg class="w-6 h-6 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></template>
         </SourceCard>
         <SourceCard title="Comms" subtitle="Messaging & contacts" disabled iconBg="bg-violet-50 dark:bg-violet-950">
@@ -267,34 +267,46 @@
         </SourceCard>
       </div>
 
-      <div v-if="target === 'erpnext'" class="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 space-y-4">
-        <p v-if="connectionCompany" class="text-xs text-primary-600 flex items-center gap-1.5 -mt-1 mb-1">
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-          Detected from your Tally data. You can edit if needed.
-        </p>
-        <div>
-          <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Company Name</label>
-          <input
-            v-model="companyName"
-            type="text"
-            placeholder="Avinash Industries"
-            class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-          />
+      <!-- Company selection -->
+      <div v-if="target === 'erpnext'">
+        <div v-if="loadingCompanies" class="text-center py-8 text-ink-faint text-sm">Loading companies...</div>
+
+        <div v-else-if="!companies.length" class="bg-white rounded-xl border border-gray-200 p-6 text-center">
+          <p class="text-ink-muted text-sm">No companies found. Please set up a company in SenaERP first.</p>
         </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Company Abbreviation</label>
-          <input
-            v-model="companyAbbr"
-            type="text"
-            placeholder="AI"
-            maxlength="5"
-            class="w-32 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent uppercase"
-          />
+
+        <div v-else class="space-y-3">
+          <p class="text-xs font-medium text-ink-muted mb-2">Select the company to import into</p>
+          <button
+            v-for="co in companies"
+            :key="co.name"
+            @click="selectedCompany = co"
+            :class="[
+              'w-full text-left rounded-xl border-2 p-4 transition-all flex items-center gap-4',
+              selectedCompany?.name === co.name
+                ? 'border-primary-500 bg-primary-50'
+                : 'border-gray-200 bg-white hover:border-primary-300'
+            ]"
+          >
+            <div :class="['w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0', selectedCompany?.name === co.name ? 'border-primary-500' : 'border-gray-300']">
+              <div v-if="selectedCompany?.name === co.name" class="w-2.5 h-2.5 rounded-full bg-primary-500" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="font-semibold text-sm text-ink-primary">{{ co.name }}</p>
+              <p class="text-xs text-ink-muted mt-0.5">{{ co.abbr }} &middot; {{ co.default_currency }} &middot; {{ co.country }}</p>
+            </div>
+          </button>
+
+          <!-- Warning -->
+          <div v-if="selectedCompany" class="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-4 flex items-start gap-2">
+            <svg class="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <p class="text-xs text-amber-700">Data from Tally will be imported into <strong>{{ selectedCompany.name }}</strong>. This may modify existing accounts, add customers, suppliers, and items.</p>
+          </div>
         </div>
       </div>
 
       <div class="flex justify-between mt-8">
-        <button @click="step = 0" class="px-6 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">Back</button>
+        <button @click="step = 0" class="px-6 py-2.5 text-sm font-medium text-ink-muted hover:text-ink-primary">Back</button>
         <button
           @click="fetchPreview"
           :disabled="!canProceedFromTarget"
@@ -449,11 +461,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import StepIndicator from '@/components/StepIndicator.vue'
 import SourceCard from '@/components/SourceCard.vue'
 import FileUploadRow from '@/components/FileUploadRow.vue'
-import { testTallyConnection, fetchTallyData, executeMigration } from '@/services/api.js'
+import { testTallyConnection, fetchTallyData, executeMigration, getTargetCompanies } from '@/services/api.js'
 
 const stepLabels = ['Source', 'Target', 'Preview', 'Migrate', 'Validate']
 const step = ref(0)
@@ -522,30 +534,33 @@ async function testConnection() {
 
 // Step 2: Target
 const target = ref('')
-const companyName = ref('')
-const companyAbbr = ref('')
+const companies = ref([])
+const selectedCompany = ref(null)
+const loadingCompanies = ref(false)
 const fetchingPreview = ref(false)
 
-function stripYearSuffix(name) {
-  return name.replace(/\s*-\s*\d{4}-?\d{0,2}\s*$/, '').trim()
-}
-
-function generateAbbr(name) {
-  const words = name.replace(/[-&]/g, ' ').split(/\s+/).filter(w => w.length > 0)
-  return words.map(w => w[0]).join('').toUpperCase().slice(0, 4)
-}
-
-// Auto-fill company fields when Tally company is detected
-watch(step, (newStep) => {
-  if (newStep === 1 && connectionCompany.value && !companyName.value) {
-    const cleaned = stripYearSuffix(connectionCompany.value)
-    companyName.value = cleaned
-    companyAbbr.value = generateAbbr(cleaned)
+async function selectTarget(t) {
+  target.value = t
+  if (t === 'erpnext' && !companies.value.length) {
+    loadingCompanies.value = true
+    try {
+      companies.value = await getTargetCompanies()
+      if (companies.value.length === 1) {
+        selectedCompany.value = companies.value[0]
+      }
+    } catch (e) {
+      companies.value = []
+    } finally {
+      loadingCompanies.value = false
+    }
   }
-})
+}
+
+const companyName = computed(() => selectedCompany.value?.name || '')
+const companyAbbr = computed(() => selectedCompany.value?.abbr || '')
 
 const canProceedFromTarget = computed(() => {
-  return target.value === 'erpnext' && companyName.value.trim() && companyAbbr.value.trim()
+  return target.value === 'erpnext' && !!selectedCompany.value
 })
 
 async function fetchPreview() {

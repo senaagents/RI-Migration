@@ -4,6 +4,12 @@ import frappe
 
 
 @frappe.whitelist()
+def get_target_companies():
+	"""Return list of existing companies on this site."""
+	return frappe.get_all("Company", fields=["name", "abbr", "default_currency", "country"])
+
+
+@frappe.whitelist()
 def test_tally_connection(host="localhost", port=9000):
 	"""Test connectivity to TallyPrime."""
 	from custom_app_migration.custom_app_migration.connectors.tally import TallyClient
