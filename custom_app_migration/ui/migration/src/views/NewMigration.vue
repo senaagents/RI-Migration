@@ -268,6 +268,10 @@
       </div>
 
       <div v-if="target === 'erpnext'" class="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 space-y-4">
+        <p v-if="connectionCompany" class="text-xs text-primary-600 flex items-center gap-1.5 -mt-1 mb-1">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+          Detected from your Tally data. You can edit if needed.
+        </p>
         <div>
           <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Company Name</label>
           <input
@@ -445,7 +449,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import StepIndicator from '@/components/StepIndicator.vue'
 import SourceCard from '@/components/SourceCard.vue'
 import FileUploadRow from '@/components/FileUploadRow.vue'
@@ -521,6 +525,24 @@ const target = ref('')
 const companyName = ref('')
 const companyAbbr = ref('')
 const fetchingPreview = ref(false)
+
+function stripYearSuffix(name) {
+  return name.replace(/\s*-\s*\d{4}-?\d{0,2}\s*$/, '').trim()
+}
+
+function generateAbbr(name) {
+  const words = name.replace(/[-&]/g, ' ').split(/\s+/).filter(w => w.length > 0)
+  return words.map(w => w[0]).join('').toUpperCase().slice(0, 4)
+}
+
+// Auto-fill company fields when Tally company is detected
+watch(step, (newStep) => {
+  if (newStep === 1 && connectionCompany.value && !companyName.value) {
+    const cleaned = stripYearSuffix(connectionCompany.value)
+    companyName.value = cleaned
+    companyAbbr.value = generateAbbr(cleaned)
+  }
+})
 
 const canProceedFromTarget = computed(() => {
   return target.value === 'erpnext' && companyName.value.trim() && companyAbbr.value.trim()
