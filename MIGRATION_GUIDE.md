@@ -196,3 +196,133 @@ Safe to re-run any step:
 
 **Payment Entry submission fails with "No permission for X"**
 : Payment Entries need valid paid_from/paid_to accounts. The importer resolves accounts by name. If the account doesn't exist, the Payment Entry is created but may fail submission. Check the error log in the importer results.
+
+**Day Book returns only a few vouchers (expected thousands)**
+: The Day Book report export is locked to Tally's internal UI period (set via F2 in Gateway of Tally). SVFROMDATE/SVTODATE do NOT override it. Use the TDL Collection approach described below in "Full-Year Voucher Export" instead.
+
+**Opening JE duplicated after re-run**
+: `import_ledger_opening_balances` creates a new JE every run. It does not check for existing opening JEs. If you re-run it, cancel the duplicate JE manually to avoid double-counting.
+
+## Full-Year Voucher Export (TDL Collection)
+
+The Day Book report API is unreliable for full-year exports because it respects Tally's UI period setting. Use a TDL Collection query instead:
+
+```xml
+<ENVELOPE>
+<HEADER>
+  <VERSION>1</VERSION>
+  <TALLYREQUEST>Export</TALLYREQUEST>
+  <TYPE>Collection</TYPE>
+  <ID>AllVouchers</ID>
+</HEADER>
+<BODY><DESC>
+  <STATICVARIABLES>
+    <SVCURRENTCOMPANY>Avinash Industries - Chennai Unit - 2025-26</SVCURRENTCOMPANY>
+    <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+  </STATICVARIABLES>
+  <TDL><TDLMESSAGE>
+    <COLLECTION NAME="AllVouchers" ISINITIALIZE="Yes">
+      <TYPE>Voucher</TYPE>
+      <NATIVEMETHOD>Date</NATIVEMETHOD>
+      <NATIVEMETHOD>VoucherTypeName</NATIVEMETHOD>
+      <NATIVEMETHOD>VoucherNumber</NATIVEMETHOD>
+      <NATIVEMETHOD>Amount</NATIVEMETHOD>
+      <NATIVEMETHOD>PartyLedgerName</NATIVEMETHOD>
+      <NATIVEMETHOD>Narration</NATIVEMETHOD>
+    </COLLECTION>
+  </TDLMESSAGE></TDL>
+</DESC></BODY>
+</ENVELOPE>
+```
+
+Key points:
+- `ISINITIALIZE="Yes"` bypasses the Tally UI period filter
+- `SVCURRENTCOMPANY` is required -- without it, voucher queries return empty
+- For Avinash Industries 2025-26, this returns **29,562 vouchers** (35.7 MB XML)
+- The Day Book report with the same company returns only the current UI period's vouchers
+
+For large datasets (29K+), **batch by voucher type** (NOT by month, NOT NATIVEMETHOD=*). Use Tally's built-in type predicates as filters:
+
+```xml
+<!-- Sales vouchers with full detail -->
+<COLLECTION NAME="SalesVch" ISINITIALIZE="Yes">
+  <TYPE>Voucher</TYPE>
+  <FILTER>SalesFilter</FILTER>
+  <FETCH>*, ALLLEDGERENTRIES, ALLINVENTORYENTRIES</FETCH>
+</COLLECTION>
+<SYSTEM TYPE="Formulae" NAME="SalesFilter">$$IsSales:$VoucherTypeName</SYSTEM>
+
+<!-- Purchase vouchers -->
+<SYSTEM TYPE="Formulae" NAME="PurchFilter">$$IsPurchase:$VoucherTypeName</SYSTEM>
+
+<!-- Payments and Receipts -->
+<SYSTEM TYPE="Formulae" NAME="PayFilter">$$IsPayment:$VoucherTypeName OR $$IsReceipt:$VoucherTypeName</SYSTEM>
+
+<!-- Journals and Contras -->
+<SYSTEM TYPE="Formulae" NAME="JrnFilter">$$IsJournal:$VoucherTypeName OR $$IsContra:$VoucherTypeName</SYSTEM>
+
+<!-- Debit/Credit Notes -->
+<SYSTEM TYPE="Formulae" NAME="NoteFilter">$$IsDebitNote:$VoucherTypeName OR $$IsCreditNote:$VoucherTypeName</SYSTEM>
+```
+
+Proven results for Avinash Industries 2025-26:
+- Sales: 703 vouchers, 87MB
+- Purchase: 2,928 vouchers, 353MB
+- Payments/Receipts: 3,473 vouchers, 148MB
+- Journals/Contras: 2,325 vouchers, 126MB
+- Debit/Credit Notes: 241 vouchers, 32MB
+
+**NEVER use `NATIVEMETHOD=*`** — it crashes Tally with Memory Access Violation on large datasets. Use `FETCH=*, ALLLEDGERENTRIES, ALLINVENTORYENTRIES` instead.
+
+**NEVER batch by month** with SVFROMDATE/SVTODATE — these date params are ignored by TDL Collection. The ISINITIALIZE flag already gets everything.
+
+## Voucher Type Mapping
+
+Tally uses custom voucher type names (e.g. "61 Sales", "32 Payt Bank"). The transformer resolves these to base types using the Voucher Type hierarchy (Parent field).
+
+### Handled types (mapped to ERPNext doctypes):
+
+| Base Type | Example Tally Names | ERPNext DocType | Count (Avinash) |
+|-----------|-------------------|-----------------|-----------------|
+| Sales | 61 Sales | Sales Invoice | 702 |
+| Purchase | 31-Puchase(Monthly) | Purchase Invoice | 2,928 |
+| Credit Note | 6/3 Credit Note, 3-Credit Note | Sales Invoice (return) | 25 |
+| Debit Note | 3- Debit Note (Rejection), 3/6 -Debit Note | Purchase Invoice (return) | 179 |
+| Receipt | 72/62/12/3/1/5/2 Receipts Bank/Cash | Payment Entry (Receive) | 573 |
+| Payment | 32/12/52/72/22/83/92/42/29 Payt Bank/Cash | Payment Entry (Pay) | 2,603 |
+| Journal | 11/51/31/21/41/71/91/113 Journal, Provision Journal | Journal Entry | 2,099 |
+| Contra | 72 Contra | Journal Entry | 91 |
+| **Total handled** | | | **~9,200** |
+
+### Unhandled types (silently dropped by transformer):
+
+| Base Type | Example Tally Names | Needed ERPNext DocType | Count (Avinash) |
+|-----------|-------------------|----------------------|-----------------|
+| Stock Journal | Stock Journal, Conversion Stock Journal, MFG variants | Stock Entry (Repack/Manufacture) | 15,037 |
+| Material In | Material In | Stock Entry (Material Receipt) | 907 |
+| Material Out | Material Out | Stock Entry (Material Issue) | 1,024 |
+| Store Movement | Store Movement Stk Jrl | Stock Entry (Material Transfer) | 150 |
+| Receipt Note | Receipt Note, Receipt Note - Stock Alignment | Purchase Receipt | 240 |
+| Delivery Challan | Delivery Challan (various) | Delivery Note | 300 |
+| Purchase Order | Purchase Order, Purchase Order -Others/ForeCast | Purchase Order | 1,024 |
+| Sales Order | Sales Order | Sales Order | 41 |
+| Job Order | Job Order | Job Card / Work Order | 81 |
+| **Total unhandled** | | | **~18,804** |
+
+## Production Sync
+
+The `prod_sync.py` module exports local ERPNext data as JSON files and imports them on a production site.
+
+### Export (run on dev):
+```bash
+bench --site dev.localhost execute custom_app_migration.custom_app_migration.prod_sync.export_company_data \
+  --kwargs '{"company_name": "Avinash Industries", "company_abbr": "AI"}'
+```
+Writes JSON files to `/tmp/avinash_export/` in dependency order (UOM, groups, accounts, items, customers, suppliers, addresses, then submitted transactions).
+
+### Import (run on prod):
+```bash
+bench --site <prod_site> execute custom_app_migration.custom_app_migration.prod_sync.import_company_data \
+  --kwargs '{"import_dir": "/tmp/avinash_export"}'
+```
+Imports in dependency order, skips duplicates, rebuilds nested set trees (Account, Cost Center, Warehouse, Item Group), and submits submittable documents (JE, SI, PI, PE, SR).
