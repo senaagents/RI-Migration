@@ -13,7 +13,7 @@ RI-Migration migrates data from TallyPrime into ERPNext. It uses a 4-layer pipel
 
 - TallyPrime running with HTTP server enabled (Settings > Connectivity > default port 9000)
 - Network access from ERPNext server to Tally machine (e.g. `10.211.55.3:9000`)
-- ERPNext site with `custom_app_migration` installed
+- ERPNext site with `agentapp_migration` installed
 - Company created in ERPNext with matching abbreviation (e.g. "Avinash Industries", abbr "AI")
 - Fiscal Year created matching Tally's active period
 
@@ -22,13 +22,13 @@ RI-Migration migrates data from TallyPrime into ERPNext. It uses a 4-layer pipel
 Full master data migration (accounts, customers, suppliers, items, warehouses, cost centres):
 
 ```bash
-bench --site <site> execute custom_app_migration.custom_app_migration.api.execute_migration \
+bench --site <site> execute agentapp_migration.agentapp_migration.api.execute_migration \
   --kwargs '{"host": "10.211.55.3", "port": 9000, "company_name": "Avinash Industries", "company_abbr": "AI"}'
 ```
 
 This runs as a background job. Poll status with:
 ```bash
-bench --site <site> execute custom_app_migration.custom_app_migration.api.get_migration_status \
+bench --site <site> execute agentapp_migration.agentapp_migration.api.get_migration_status \
   --kwargs '{"job_id": "<job_id_from_above>"}'
 ```
 
@@ -42,23 +42,23 @@ Imports accounts (chart of accounts), customer groups, supplier groups, item gro
 
 ```bash
 # Full master data from live Tally
-bench --site <site> execute custom_app_migration.custom_app_migration.api.execute_migration \
+bench --site <site> execute agentapp_migration.agentapp_migration.api.execute_migration \
   --kwargs '{"host": "10.211.55.3", "port": 9000, "company_name": "Avinash Industries", "company_abbr": "AI"}'
 
 # Or from a saved XML file (List of Accounts export)
-bench --site <site> execute custom_app_migration.custom_app_migration.api.execute_migration_from_file \
+bench --site <site> execute agentapp_migration.agentapp_migration.api.execute_migration_from_file \
   --kwargs '{"file_path": "/path/to/list-of-accounts.xml", "company_name": "Avinash Industries", "company_abbr": "AI"}'
 ```
 
 Stock data can be imported separately if needed:
 ```bash
-bench --site <site> execute custom_app_migration.custom_app_migration.api.import_stock_data \
+bench --site <site> execute agentapp_migration.agentapp_migration.api.import_stock_data \
   --kwargs '{"host": "10.211.55.3", "port": 9000, "company_name": "Avinash Industries", "company_abbr": "AI"}'
 ```
 
 Cost centres (filters out payroll/employee entries automatically):
 ```bash
-bench --site <site> execute custom_app_migration.custom_app_migration.api.import_cost_centres \
+bench --site <site> execute agentapp_migration.agentapp_migration.api.import_cost_centres \
   --kwargs '{"host": "10.211.55.3", "port": 9000, "company_name": "Avinash Industries", "company_abbr": "AI"}'
 ```
 
@@ -67,7 +67,7 @@ bench --site <site> execute custom_app_migration.custom_app_migration.api.import
 Creates a Stock Reconciliation from item-level closing balances (TDL Collection API, not the Stock Summary report which only has group-level data).
 
 ```bash
-bench --site <site> execute custom_app_migration.custom_app_migration.api.import_opening_stock_from_tally \
+bench --site <site> execute agentapp_migration.agentapp_migration.api.import_opening_stock_from_tally \
   --kwargs '{"host": "10.211.55.3", "port": 9000, "company_name": "Avinash Industries"}'
 ```
 
@@ -78,7 +78,7 @@ Items with zero valuation rate get `allow_zero_valuation_rate=1` automatically.
 Creates a Journal Entry from leaf-level ledger opening balances. Skips group accounts, receivable/payable accounts (handled in Step 4), and stock-related accounts.
 
 ```bash
-bench --site <site> execute custom_app_migration.custom_app_migration.api.import_ledger_opening_balances \
+bench --site <site> execute agentapp_migration.agentapp_migration.api.import_ledger_opening_balances \
   --kwargs '{"host": "10.211.55.3", "port": 9000, "company_name": "Avinash Industries", "company_abbr": "AI"}'
 ```
 
@@ -87,7 +87,7 @@ bench --site <site> execute custom_app_migration.custom_app_migration.api.import
 Creates Opening Sales Invoices (for customer debtors) and Opening Purchase Invoices (for supplier creditors) with `is_opening=Yes`.
 
 ```bash
-bench --site <site> execute custom_app_migration.custom_app_migration.api.import_opening_invoices_from_tally \
+bench --site <site> execute agentapp_migration.agentapp_migration.api.import_opening_invoices_from_tally \
   --kwargs '{"host": "10.211.55.3", "port": 9000, "company_name": "Avinash Industries", "company_abbr": "AI"}'
 ```
 
@@ -97,11 +97,11 @@ Imports Day Book vouchers as Sales Invoices, Purchase Invoices, Payment Entries,
 
 ```bash
 # From live Tally with date range
-bench --site <site> execute custom_app_migration.custom_app_migration.api.execute_voucher_migration \
+bench --site <site> execute agentapp_migration.agentapp_migration.api.execute_voucher_migration \
   --kwargs '{"host": "10.211.55.3", "port": 9000, "company_name": "Avinash Industries", "company_abbr": "AI", "from_date": "20260401", "to_date": "20260430"}'
 
 # From saved Day Book XML
-bench --site <site> execute custom_app_migration.custom_app_migration.api.execute_voucher_migration_from_file \
+bench --site <site> execute agentapp_migration.agentapp_migration.api.execute_voucher_migration_from_file \
   --kwargs '{"file_path": "/path/to/day-book.xml", "company_name": "Avinash Industries", "company_abbr": "AI"}'
 ```
 
@@ -142,7 +142,7 @@ All CLI helpers follow the same kwargs pattern: `'{"host": "...", "port": 9000, 
 Run after migration to verify data accuracy:
 
 ```bash
-bench --site <site> execute custom_app_migration.custom_app_migration.audit.audit_migration \
+bench --site <site> execute agentapp_migration.agentapp_migration.audit.audit_migration \
   --kwargs '{"host": "10.211.55.3", "port": 9000, "company_name": "Avinash Industries", "company_abbr": "AI"}'
 ```
 
@@ -315,14 +315,14 @@ The `prod_sync.py` module exports local ERPNext data as JSON files and imports t
 
 ### Export (run on dev):
 ```bash
-bench --site dev.localhost execute custom_app_migration.custom_app_migration.prod_sync.export_company_data \
+bench --site dev.localhost execute agentapp_migration.agentapp_migration.prod_sync.export_company_data \
   --kwargs '{"company_name": "Avinash Industries", "company_abbr": "AI"}'
 ```
 Writes JSON files to `/tmp/avinash_export/` in dependency order (UOM, groups, accounts, items, customers, suppliers, addresses, then submitted transactions).
 
 ### Import (run on prod):
 ```bash
-bench --site <prod_site> execute custom_app_migration.custom_app_migration.prod_sync.import_company_data \
+bench --site <prod_site> execute agentapp_migration.agentapp_migration.prod_sync.import_company_data \
   --kwargs '{"import_dir": "/tmp/avinash_export"}'
 ```
 Imports in dependency order, skips duplicates, rebuilds nested set trees (Account, Cost Center, Warehouse, Item Group), and submits submittable documents (JE, SI, PI, PE, SR).

@@ -416,7 +416,7 @@ def ingest_source_objects(connection_id=None, bridge_token=None, objects_json=No
 @frappe.whitelist()
 def test_tally_connection(host="localhost", port=9000):
 	"""Test connectivity to TallyPrime."""
-	from custom_app_migration.custom_app_migration.connectors.tally import TallyClient
+	from agentapp_migration.agentapp_migration.connectors.tally import TallyClient
 
 	client = TallyClient(host=host, port=int(port))
 	return client.test_connection()
@@ -432,13 +432,13 @@ def fetch_tally_data(host="localhost", port=9000):
 
 	Returns summary counts and the parsed data for preview.
 	"""
-	from custom_app_migration.custom_app_migration.connectors.tally import TallyClient
-	from custom_app_migration.custom_app_migration.parsers.tally import (
+	from agentapp_migration.agentapp_migration.connectors.tally import TallyClient
+	from agentapp_migration.agentapp_migration.parsers.tally import (
 		parse_list_of_accounts,
 		parse_trial_balance,
 		parse_stock_summary,
 	)
-	from custom_app_migration.custom_app_migration.transformers.tally_to_erpnext import classify_ledger
+	from agentapp_migration.agentapp_migration.transformers.tally_to_erpnext import classify_ledger
 
 	client = TallyClient(host=host, port=int(port))
 
@@ -476,9 +476,9 @@ def fetch_tally_data(host="localhost", port=9000):
 @frappe.whitelist()
 def preview_migration(host="localhost", port=9000, company_name="", company_abbr=""):
 	"""Preview what the migration will create without making changes."""
-	from custom_app_migration.custom_app_migration.connectors.tally import TallyClient
-	from custom_app_migration.custom_app_migration.parsers.tally import parse_list_of_accounts
-	from custom_app_migration.custom_app_migration.transformers.tally_to_erpnext import transform_all
+	from agentapp_migration.agentapp_migration.connectors.tally import TallyClient
+	from agentapp_migration.agentapp_migration.parsers.tally import parse_list_of_accounts
+	from agentapp_migration.agentapp_migration.transformers.tally_to_erpnext import transform_all
 
 	if not company_name or not company_abbr:
 		frappe.throw("company_name and company_abbr are required")
@@ -536,7 +536,7 @@ def execute_migration(host="localhost", port=9000, company_name="", company_abbr
 	_set_progress(job_id, "queued", "Queued for execution", 0)
 
 	enqueue(
-		"custom_app_migration.custom_app_migration.api._run_migration_job",
+		"agentapp_migration.agentapp_migration.api._run_migration_job",
 		host=host,
 		port=int(port),
 		company_name=company_name,
@@ -572,15 +572,15 @@ def get_migration_status(job_id=None):
 
 def _run_migration_job(host, port, company_name, company_abbr, dry_run=False, job_id=""):
 	"""The actual migration logic. Runs in a background RQ worker."""
-	from custom_app_migration.custom_app_migration.connectors.tally import TallyClient
-	from custom_app_migration.custom_app_migration.parsers.tally import (
+	from agentapp_migration.agentapp_migration.connectors.tally import TallyClient
+	from agentapp_migration.agentapp_migration.parsers.tally import (
 		parse_list_of_accounts,
 		parse_trial_balance,
 		parse_stock_summary,
 		parse_collection,
 	)
-	from custom_app_migration.custom_app_migration.transformers.tally_to_erpnext import transform_all
-	from custom_app_migration.custom_app_migration.importers.erpnext import ERPNextImporter
+	from agentapp_migration.agentapp_migration.transformers.tally_to_erpnext import transform_all
+	from agentapp_migration.agentapp_migration.importers.erpnext import ERPNextImporter
 
 	steps_done = []
 	errors = []
@@ -763,7 +763,7 @@ def execute_migration_from_file(file_path="", company_name="", company_abbr="", 
 	_set_progress(job_id, "queued", "Queued for execution", 0)
 
 	enqueue(
-		"custom_app_migration.custom_app_migration.api._run_file_migration_job",
+		"agentapp_migration.agentapp_migration.api._run_file_migration_job",
 		file_path=file_path,
 		company_name=company_name,
 		company_abbr=company_abbr,
@@ -779,9 +779,9 @@ def execute_migration_from_file(file_path="", company_name="", company_abbr="", 
 
 def _run_file_migration_job(file_path, company_name, company_abbr, dry_run=False, job_id=""):
 	"""File-based migration job. Runs in background worker."""
-	from custom_app_migration.custom_app_migration.parsers.tally import parse_list_of_accounts
-	from custom_app_migration.custom_app_migration.transformers.tally_to_erpnext import transform_all
-	from custom_app_migration.custom_app_migration.importers.erpnext import ERPNextImporter
+	from agentapp_migration.agentapp_migration.parsers.tally import parse_list_of_accounts
+	from agentapp_migration.agentapp_migration.transformers.tally_to_erpnext import transform_all
+	from agentapp_migration.agentapp_migration.importers.erpnext import ERPNextImporter
 
 	steps_done = []
 	errors = []
@@ -826,16 +826,16 @@ def import_stock_data(host="localhost", port=9000, company_name="", company_abbr
 	"""Fetch stock groups, stock items, and godowns from Tally and import into ERPNext.
 
 	Designed for incremental use — skips duplicates, only creates new records.
-	Call via: bench --site <site> execute custom_app_migration.custom_app_migration.api.import_stock_data --kwargs '{...}'
+	Call via: bench --site <site> execute agentapp_migration.agentapp_migration.api.import_stock_data --kwargs '{...}'
 	"""
-	from custom_app_migration.custom_app_migration.connectors.tally import TallyClient
-	from custom_app_migration.custom_app_migration.parsers.tally import parse_collection
-	from custom_app_migration.custom_app_migration.transformers.tally_to_erpnext import (
+	from agentapp_migration.agentapp_migration.connectors.tally import TallyClient
+	from agentapp_migration.agentapp_migration.parsers.tally import parse_collection
+	from agentapp_migration.agentapp_migration.transformers.tally_to_erpnext import (
 		transform_item_groups,
 		transform_items,
 		transform_warehouses,
 	)
-	from custom_app_migration.custom_app_migration.importers.erpnext import ERPNextImporter
+	from agentapp_migration.agentapp_migration.importers.erpnext import ERPNextImporter
 
 	if not company_name or not company_abbr:
 		print("ERROR: company_name and company_abbr are required")
@@ -885,12 +885,12 @@ def import_cost_centres(host="localhost", port=9000, company_name="", company_ab
 	"""Fetch cost centres from Tally and import into ERPNext.
 
 	Skips payroll/employee entries. Creates non-duplicate Cost Centers.
-	Call via: bench --site <site> execute custom_app_migration.custom_app_migration.api.import_cost_centres --kwargs '{...}'
+	Call via: bench --site <site> execute agentapp_migration.agentapp_migration.api.import_cost_centres --kwargs '{...}'
 	"""
-	from custom_app_migration.custom_app_migration.connectors.tally import TallyClient
-	from custom_app_migration.custom_app_migration.parsers.tally import parse_collection
-	from custom_app_migration.custom_app_migration.transformers.tally_to_erpnext import transform_cost_centres
-	from custom_app_migration.custom_app_migration.importers.erpnext import ERPNextImporter
+	from agentapp_migration.agentapp_migration.connectors.tally import TallyClient
+	from agentapp_migration.agentapp_migration.parsers.tally import parse_collection
+	from agentapp_migration.agentapp_migration.transformers.tally_to_erpnext import transform_cost_centres
+	from agentapp_migration.agentapp_migration.importers.erpnext import ERPNextImporter
 
 	if not company_name or not company_abbr:
 		print("ERROR: company_name and company_abbr are required")
@@ -932,14 +932,14 @@ def import_cost_centres(host="localhost", port=9000, company_name="", company_ab
 def import_opening_data(host="localhost", port=9000, company_name=""):
 	"""Fetch trial balance and stock summary from Tally and create opening entries.
 
-	Call via: bench --site <site> execute custom_app_migration.custom_app_migration.api.import_opening_data --kwargs '{...}'
+	Call via: bench --site <site> execute agentapp_migration.agentapp_migration.api.import_opening_data --kwargs '{...}'
 	"""
-	from custom_app_migration.custom_app_migration.connectors.tally import TallyClient
-	from custom_app_migration.custom_app_migration.parsers.tally import (
+	from agentapp_migration.agentapp_migration.connectors.tally import TallyClient
+	from agentapp_migration.agentapp_migration.parsers.tally import (
 		parse_trial_balance,
 		parse_stock_summary,
 	)
-	from custom_app_migration.custom_app_migration.importers.erpnext import ERPNextImporter
+	from agentapp_migration.agentapp_migration.importers.erpnext import ERPNextImporter
 
 	if not company_name:
 		print("ERROR: company_name is required")
@@ -1013,7 +1013,7 @@ def execute_voucher_migration(
 	_set_progress(job_id, "queued", "Queued for voucher migration", 0)
 
 	enqueue(
-		"custom_app_migration.custom_app_migration.api._run_voucher_migration_job",
+		"agentapp_migration.agentapp_migration.api._run_voucher_migration_job",
 		host=host,
 		port=int(port),
 		company_name=company_name,
@@ -1035,10 +1035,10 @@ def _run_voucher_migration_job(
 	from_date=None, to_date=None, dry_run=False, job_id="",
 ):
 	"""Background job: fetch Day Book from Tally, parse, transform, import."""
-	from custom_app_migration.custom_app_migration.connectors.tally import TallyClient
-	from custom_app_migration.custom_app_migration.parsers.tally import parse_day_book
-	from custom_app_migration.custom_app_migration.transformers.tally_to_erpnext import transform_vouchers
-	from custom_app_migration.custom_app_migration.importers.erpnext import ERPNextImporter
+	from agentapp_migration.agentapp_migration.connectors.tally import TallyClient
+	from agentapp_migration.agentapp_migration.parsers.tally import parse_day_book
+	from agentapp_migration.agentapp_migration.transformers.tally_to_erpnext import transform_vouchers
+	from agentapp_migration.agentapp_migration.importers.erpnext import ERPNextImporter
 
 	steps_done = []
 	errors = []
@@ -1059,7 +1059,7 @@ def _run_voucher_migration_job(
 		progress("Fetching voucher type definitions...", 20)
 		try:
 			vt_xml = client.get_collection("Voucher Type", ["Name", "Parent"])
-			from custom_app_migration.custom_app_migration.parsers.tally import parse_collection
+			from agentapp_migration.agentapp_migration.parsers.tally import parse_collection
 			voucher_types = parse_collection(vt_xml, "VOUCHERTYPE")
 		except Exception as exc:
 			logger.warning("Could not fetch voucher types: %s — using inline type detection", exc)
@@ -1151,7 +1151,7 @@ def execute_voucher_migration_from_file(
 	_set_progress(job_id, "queued", "Queued for voucher file migration", 0)
 
 	enqueue(
-		"custom_app_migration.custom_app_migration.api._run_voucher_file_migration_job",
+		"agentapp_migration.agentapp_migration.api._run_voucher_file_migration_job",
 		file_path=file_path,
 		company_name=company_name,
 		company_abbr=company_abbr,
@@ -1167,9 +1167,9 @@ def execute_voucher_migration_from_file(
 
 def _run_voucher_file_migration_job(file_path, company_name, company_abbr, dry_run=False, job_id=""):
 	"""File-based voucher migration job."""
-	from custom_app_migration.custom_app_migration.parsers.tally import parse_day_book
-	from custom_app_migration.custom_app_migration.transformers.tally_to_erpnext import transform_vouchers
-	from custom_app_migration.custom_app_migration.importers.erpnext import ERPNextImporter
+	from agentapp_migration.agentapp_migration.parsers.tally import parse_day_book
+	from agentapp_migration.agentapp_migration.transformers.tally_to_erpnext import transform_vouchers
+	from agentapp_migration.agentapp_migration.importers.erpnext import ERPNextImporter
 
 	steps_done = []
 	errors = []
@@ -1216,11 +1216,11 @@ def import_opening_stock_from_tally(host="localhost", port=9000, company_name=""
 	Uses the TDL Collection API to get CLOSINGBALANCE per Stock Item,
 	instead of the Stock Summary report (which gives group-level data).
 
-	Call via: bench --site <site> execute custom_app_migration.custom_app_migration.api.import_opening_stock_from_tally --kwargs '{...}'
+	Call via: bench --site <site> execute agentapp_migration.agentapp_migration.api.import_opening_stock_from_tally --kwargs '{...}'
 	"""
-	from custom_app_migration.custom_app_migration.connectors.tally import TallyClient
-	from custom_app_migration.custom_app_migration.parsers.tally import parse_stock_item_balances
-	from custom_app_migration.custom_app_migration.importers.erpnext import ERPNextImporter
+	from agentapp_migration.agentapp_migration.connectors.tally import TallyClient
+	from agentapp_migration.agentapp_migration.parsers.tally import parse_stock_item_balances
+	from agentapp_migration.agentapp_migration.importers.erpnext import ERPNextImporter
 
 	if not company_name:
 		print("ERROR: company_name is required")
@@ -1257,12 +1257,12 @@ def import_opening_stock_from_tally(host="localhost", port=9000, company_name=""
 def import_opening_invoices_from_tally(host="localhost", port=9000, company_name="", company_abbr=""):
 	"""Fetch ledger opening balances from Tally and create opening Sales/Purchase Invoices.
 
-	Call via: bench --site <site> execute custom_app_migration.custom_app_migration.api.import_opening_invoices_from_tally --kwargs '{...}'
+	Call via: bench --site <site> execute agentapp_migration.agentapp_migration.api.import_opening_invoices_from_tally --kwargs '{...}'
 	"""
-	from custom_app_migration.custom_app_migration.connectors.tally import TallyClient
-	from custom_app_migration.custom_app_migration.parsers.tally import parse_list_of_accounts
-	from custom_app_migration.custom_app_migration.transformers.tally_to_erpnext import classify_ledger
-	from custom_app_migration.custom_app_migration.importers.erpnext import ERPNextImporter
+	from agentapp_migration.agentapp_migration.connectors.tally import TallyClient
+	from agentapp_migration.agentapp_migration.parsers.tally import parse_list_of_accounts
+	from agentapp_migration.agentapp_migration.transformers.tally_to_erpnext import classify_ledger
+	from agentapp_migration.agentapp_migration.importers.erpnext import ERPNextImporter
 
 	if not company_name or not company_abbr:
 		print("ERROR: company_name and company_abbr are required")
@@ -1326,11 +1326,11 @@ def import_ledger_opening_balances(host="localhost", port=9000, company_name="",
 	Uses leaf-level ledger data (not group-level Trial Balance), giving accurate
 	per-account opening balances. Skips customer/supplier ledgers (handled by opening invoices).
 
-	Call via: bench --site <site> execute custom_app_migration.custom_app_migration.api.import_ledger_opening_balances --kwargs '{...}'
+	Call via: bench --site <site> execute agentapp_migration.agentapp_migration.api.import_ledger_opening_balances --kwargs '{...}'
 	"""
-	from custom_app_migration.custom_app_migration.connectors.tally import TallyClient
-	from custom_app_migration.custom_app_migration.parsers.tally import parse_list_of_accounts
-	from custom_app_migration.custom_app_migration.importers.erpnext import ERPNextImporter
+	from agentapp_migration.agentapp_migration.connectors.tally import TallyClient
+	from agentapp_migration.agentapp_migration.parsers.tally import parse_list_of_accounts
+	from agentapp_migration.agentapp_migration.importers.erpnext import ERPNextImporter
 
 	if not company_name or not company_abbr:
 		print("ERROR: company_name and company_abbr are required")

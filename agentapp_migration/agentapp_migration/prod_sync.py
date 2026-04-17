@@ -23,7 +23,7 @@ _DEFAULT_EXPORT_DIR = "/tmp/avinash_export"
 def export_company_data(company_name="Avinash Industries", company_abbr="AI", export_dir=_DEFAULT_EXPORT_DIR):
 	"""Export all company data as JSON files for prod import.
 
-	Call via: bench --site dev.localhost execute custom_app_migration.custom_app_migration.prod_sync.export_company_data
+	Call via: bench --site dev.localhost execute agentapp_migration.agentapp_migration.prod_sync.export_company_data
 	"""
 	os.makedirs(export_dir, exist_ok=True)
 
@@ -157,7 +157,7 @@ _SUBMITTABLE_DOCTYPES = {"Stock Reconciliation", "Journal Entry", "Sales Invoice
 def import_company_data(import_dir=_DEFAULT_EXPORT_DIR):
 	"""Import company data from JSON files. Run on the PROD site.
 
-	Call via: bench --site <prod_site> execute custom_app_migration.custom_app_migration.prod_sync.import_company_data
+	Call via: bench --site <prod_site> execute agentapp_migration.agentapp_migration.prod_sync.import_company_data
 	"""
 	results = {}
 	trees_to_rebuild = set()

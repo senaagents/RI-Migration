@@ -426,7 +426,7 @@ class ERPNextImporter:
 		if not ledgers or self.dry_run:
 			return
 
-		from custom_app_migration.custom_app_migration.transformers.tally_to_erpnext import classify_ledger
+		from agentapp_migration.agentapp_migration.transformers.tally_to_erpnext import classify_ledger
 
 		if not as_of_date:
 			fy = frappe.db.get_value("Fiscal Year", {"company": self.company}, "year_start_date")

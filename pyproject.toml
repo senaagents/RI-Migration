@@ -1,5 +1,5 @@
 [project]
-name = "custom_app_migration"
+name = "agentapp_migration"
 authors = [
     { name = "Sena", email = "hello@senaagents.com" }
 ]

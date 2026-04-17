@@ -403,7 +403,7 @@ def transform_vouchers(vouchers, voucher_types, company_name, company_abbr):
 		dict with keys: sales_invoices, purchase_invoices, payment_entries, journal_entries.
 		Each value is a list of ERPNext doc dicts.
 	"""
-	from custom_app_migration.custom_app_migration.parsers.tally import resolve_voucher_base_type
+	from agentapp_migration.agentapp_migration.parsers.tally import resolve_voucher_base_type
 
 	result = {
 		"sales_invoices": [],

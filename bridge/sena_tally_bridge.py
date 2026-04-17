@@ -28,7 +28,7 @@ from hashlib import sha256
 from typing import Iterable
 
 
-DEFAULT_METHOD_PREFIX = "custom_app_migration.custom_app_migration.api"
+DEFAULT_METHOD_PREFIX = "agentapp_migration.agentapp_migration.api"
 INVALID_XML_CHARS = re.compile(r"&#(?:[0-8]|1[0-1]|1[4-9]|2[0-9]|3[01]);")
 
 

@@ -11,14 +11,14 @@ logger = logging.getLogger(__name__)
 @frappe.whitelist()
 def audit_migration(host="10.211.55.3", port=9000, company_name="Avinash Industries", company_abbr="AI"):
 	"""Compare Tally data with ERPNext data and report discrepancies."""
-	from custom_app_migration.custom_app_migration.connectors.tally import TallyClient
-	from custom_app_migration.custom_app_migration.parsers.tally import (
+	from agentapp_migration.agentapp_migration.connectors.tally import TallyClient
+	from agentapp_migration.agentapp_migration.parsers.tally import (
 		parse_list_of_accounts,
 		parse_collection,
 		parse_trial_balance,
 		parse_stock_summary,
 	)
-	from custom_app_migration.custom_app_migration.transformers.tally_to_erpnext import classify_ledger
+	from agentapp_migration.agentapp_migration.transformers.tally_to_erpnext import classify_ledger
 
 	client = TallyClient(host, int(port))
 

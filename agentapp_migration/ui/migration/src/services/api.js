@@ -1,4 +1,4 @@
-const API_BASE = '/api/method/custom_app_migration.custom_app_migration.api'
+const API_BASE = '/api/method/agentapp_migration.agentapp_migration.api'
 
 function getCSRF() {
   // Try reading from cookie
@@ -38,7 +38,7 @@ function callBridgeAPI(method, params = {}) {
     window.parent.postMessage({
       type: 'sena:api-call',
       id,
-      method: `custom_app_migration.custom_app_migration.api.${method}`,
+      method: `agentapp_migration.agentapp_migration.api.${method}`,
       params,
     }, '*')
     // Timeout after 30s
