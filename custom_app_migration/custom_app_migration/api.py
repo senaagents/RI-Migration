@@ -6,13 +6,22 @@ returns immediately. The frontend polls get_migration_status for progress.
 
 import json
 import logging
+import secrets
+import hashlib
 
 import frappe
+from frappe.utils import add_to_date, now_datetime
 from frappe.utils.background_jobs import enqueue, is_job_enqueued
 
 logger = logging.getLogger(__name__)
 
 _CACHE_KEY = "migration_progress"
+
+TYD_CONNECTION_DOCTYPE = "TYD Source Connection"
+TYD_CHECKPOINT_DOCTYPE = "TYD Sync Checkpoint"
+TYD_SOURCE_OBJECT_DOCTYPE = "TYD Source Object"
+TYD_RAW_PAYLOAD_DOCTYPE = "TYD Raw Payload"
+TYD_NORMALIZED_RECORD_DOCTYPE = "TYD Normalized Record"
 
 
 # ---------------------------------------------------------------------------
@@ -33,6 +42,67 @@ def _set_progress(job_id, status, step, progress, steps_done=None, errors=None, 
 	frappe.publish_realtime("migration_progress", {"job_id": job_id, **data})
 
 
+def _parse_json(value, default=None):
+	if value in (None, ""):
+		return default
+	if isinstance(value, (dict, list)):
+		return value
+	return json.loads(value)
+
+
+def _json_dumps(value):
+	return json.dumps(value or {}, ensure_ascii=False, sort_keys=True)
+
+
+def _hash_text(value):
+	if value is None:
+		value = ""
+	if not isinstance(value, str):
+		value = _json_dumps(value)
+	return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _get_password(doc, fieldname):
+	try:
+		return doc.get_password(fieldname) or ""
+	except Exception:
+		return doc.get(fieldname) or ""
+
+
+def _verify_bridge(connection_id, bridge_token):
+	if not connection_id or not bridge_token:
+		frappe.throw("connection_id and bridge_token are required")
+	doc = frappe.get_doc(TYD_CONNECTION_DOCTYPE, connection_id)
+	stored = _get_password(doc, "bridge_token")
+	if not stored or not secrets.compare_digest(stored, bridge_token):
+		frappe.throw("Invalid bridge token", frappe.PermissionError)
+	return doc
+
+
+def _new_pairing_code():
+	for _ in range(10):
+		code = secrets.token_urlsafe(6).replace("-", "").replace("_", "")[:8].upper()
+		if not frappe.get_all(TYD_CONNECTION_DOCTYPE, filters={"pairing_code": code, "status": "Pairing"}, limit=1):
+			return code
+	frappe.throw("Could not allocate a pairing code. Please try again.")
+
+
+def _normalized_record_from_item(item, object_type, source_id):
+	normalized = item.get("normalized_json")
+	if normalized in (None, ""):
+		normalized = {
+			"source_type": "Tally",
+			"object_type": object_type,
+			"source_id": source_id,
+			"source_guid": item.get("source_guid") or "",
+			"name": item.get("source_name") or "",
+			"alter_id": item.get("source_alter_id") or "",
+		}
+	if isinstance(normalized, str):
+		return _parse_json(normalized, default={}) or {}
+	return normalized or {}
+
+
 # ---------------------------------------------------------------------------
 # Quick endpoints (synchronous, fast)
 # ---------------------------------------------------------------------------
@@ -41,6 +111,306 @@ def _set_progress(job_id, status, step, progress, steps_done=None, errors=None, 
 def get_target_companies():
 	"""Return list of existing companies on this site."""
 	return frappe.get_all("Company", fields=["name", "abbr", "default_currency", "country"])
+
+
+# ---------------------------------------------------------------------------
+# Talk to Your Data control-plane APIs
+# ---------------------------------------------------------------------------
+
+@frappe.whitelist()
+def create_tyd_tally_pairing(connection_label=None):
+	"""Create a bridge pairing record for Talk to Your Data (Tally).
+
+	The desktop bridge starts in an untrusted state. A logged-in user creates
+	this pairing from the UI, then the bridge claims it with the displayed code.
+	"""
+	if frappe.session.user == "Guest":
+		frappe.throw("Login required", frappe.PermissionError)
+
+	pairing_code = _new_pairing_code()
+	bridge_token = secrets.token_urlsafe(32)
+	label = connection_label or "Tally connection"
+
+	doc = frappe.get_doc({
+		"doctype": TYD_CONNECTION_DOCTYPE,
+		"connection_label": label,
+		"source_type": "Tally",
+		"status": "Pairing",
+		"owner_user": frappe.session.user,
+		"pairing_code": pairing_code,
+		"pairing_expires_at": add_to_date(now_datetime(), minutes=30),
+		"bridge_token": bridge_token,
+		"tally_port": 9000,
+	})
+	doc.insert(ignore_permissions=True)
+	frappe.db.commit()
+
+	return {
+		"connection_id": doc.name,
+		"pairing_code": pairing_code,
+		"expires_at": str(doc.pairing_expires_at),
+	}
+
+
+@frappe.whitelist()
+def list_tyd_connections():
+	"""List Talk to Your Data source connections for the current user."""
+	if frappe.session.user == "Guest":
+		frappe.throw("Login required", frappe.PermissionError)
+
+	filters = {}
+	if "System Manager" not in frappe.get_roles(frappe.session.user):
+		filters["owner_user"] = frappe.session.user
+
+	return frappe.get_all(
+		TYD_CONNECTION_DOCTYPE,
+		filters=filters,
+		fields=[
+			"name", "connection_label", "source_type", "status", "bridge_id",
+			"tally_company_name", "tally_version", "last_seen_at", "last_sync_at",
+			"last_error", "modified",
+		],
+		order_by="modified desc",
+		limit_page_length=100,
+	)
+
+
+@frappe.whitelist()
+def get_tyd_connection_status(connection_id=None):
+	"""Return a connection with checkpoint and object-count summaries."""
+	if not connection_id:
+		frappe.throw("connection_id is required")
+
+	doc = frappe.get_doc(TYD_CONNECTION_DOCTYPE, connection_id)
+	if doc.owner_user and doc.owner_user != frappe.session.user and "System Manager" not in frappe.get_roles(frappe.session.user):
+		frappe.throw("Not permitted", frappe.PermissionError)
+
+	checkpoints = frappe.get_all(
+		TYD_CHECKPOINT_DOCTYPE,
+		filters={"connection": connection_id},
+		fields=[
+			"name", "stream_name", "object_type", "partition_key", "status",
+			"last_success_at", "last_attempt_at", "error_count", "last_error",
+		],
+		order_by="stream_name asc",
+		limit_page_length=200,
+	)
+	count_rows = frappe.db.sql(
+		"""
+		select object_type, sync_status, count(*) as count
+		from `tabTYD Source Object`
+		where connection = %s
+		group by object_type, sync_status
+		""",
+		(connection_id,),
+		as_dict=True,
+	)
+	normalized_count_rows = frappe.db.sql(
+		"""
+		select record_type, sync_status, count(*) as count
+		from `tabTYD Normalized Record`
+		where connection = %s
+		group by record_type, sync_status
+		""",
+		(connection_id,),
+		as_dict=True,
+	)
+	return {
+		"connection": doc.as_dict(),
+		"checkpoints": checkpoints,
+		"object_counts": count_rows,
+		"normalized_counts": normalized_count_rows,
+	}
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def claim_tyd_bridge_pairing(pairing_code=None, bridge_id=None, host="localhost", port=9000, capabilities_json=None):
+	"""Claim a pending pairing from the local bridge.
+
+	The bridge receives a durable bridge_token only after proving it has the
+	user-visible pairing code.
+	"""
+	if not pairing_code:
+		frappe.throw("pairing_code is required")
+
+	rows = frappe.get_all(
+		TYD_CONNECTION_DOCTYPE,
+		filters={"pairing_code": pairing_code, "status": "Pairing"},
+		fields=["name", "pairing_expires_at"],
+		limit=1,
+	)
+	if not rows:
+		frappe.throw("Pairing code not found")
+	if rows[0].pairing_expires_at and rows[0].pairing_expires_at < now_datetime():
+		frappe.throw("Pairing code expired")
+
+	doc = frappe.get_doc(TYD_CONNECTION_DOCTYPE, rows[0].name)
+	token = _get_password(doc, "bridge_token") or secrets.token_urlsafe(32)
+	capabilities = _parse_json(capabilities_json, default={}) or {}
+	doc.status = "Active"
+	doc.bridge_id = bridge_id or doc.bridge_id or f"bridge-{frappe.generate_hash(length=8)}"
+	doc.tally_host = host or "localhost"
+	doc.tally_port = int(port or 9000)
+	doc.capabilities_json = _json_dumps(capabilities)
+	doc.last_seen_at = now_datetime()
+	doc.bridge_token = token
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+
+	return {
+		"connection_id": doc.name,
+		"bridge_token": token,
+		"status": doc.status,
+	}
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def bridge_heartbeat(connection_id=None, bridge_token=None, status="Active", tally_company_name=None, tally_version=None, capabilities_json=None, last_error=None):
+	"""Heartbeat/update endpoint for the local bridge."""
+	doc = _verify_bridge(connection_id, bridge_token)
+	capabilities = _parse_json(capabilities_json, default=None)
+
+	doc.status = status or "Active"
+	if tally_company_name is not None:
+		doc.tally_company_name = tally_company_name
+	if tally_version is not None:
+		doc.tally_version = tally_version
+	if capabilities is not None:
+		doc.capabilities_json = _json_dumps(capabilities)
+	if last_error is not None:
+		doc.last_error = last_error
+	doc.last_seen_at = now_datetime()
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+
+	return {"ok": True, "connection_id": doc.name, "status": doc.status}
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def upsert_sync_checkpoint(connection_id=None, bridge_token=None, stream_name=None, object_type=None, partition_key="", status="Running", cursor=None, error=None):
+	"""Create/update the durable cursor for one source stream."""
+	_verify_bridge(connection_id, bridge_token)
+	if not stream_name or not object_type:
+		frappe.throw("stream_name and object_type are required")
+
+	filters = {
+		"connection": connection_id,
+		"stream_name": stream_name,
+		"object_type": object_type,
+		"partition_key": partition_key or "",
+	}
+	existing = frappe.get_all(TYD_CHECKPOINT_DOCTYPE, filters=filters, fields=["name"], limit=1)
+	doc = frappe.get_doc(TYD_CHECKPOINT_DOCTYPE, existing[0].name) if existing else frappe.new_doc(TYD_CHECKPOINT_DOCTYPE)
+	doc.update(filters)
+	doc.status = status or "Running"
+	doc.last_attempt_cursor = cursor or ""
+	doc.last_attempt_at = now_datetime()
+	if doc.status == "Success":
+		doc.last_success_cursor = cursor or ""
+		doc.last_success_at = now_datetime()
+		doc.last_error = ""
+	elif error:
+		doc.error_count = int(doc.error_count or 0) + 1
+		doc.last_error = str(error)
+	if doc.is_new():
+		doc.insert(ignore_permissions=True)
+	else:
+		doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return {"ok": True, "checkpoint": doc.name}
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def ingest_source_objects(connection_id=None, bridge_token=None, objects_json=None):
+	"""Upsert source-object metadata and optional raw payloads from the bridge."""
+	_verify_bridge(connection_id, bridge_token)
+	objects = _parse_json(objects_json, default=[]) or []
+	if not isinstance(objects, list):
+		frappe.throw("objects_json must be a JSON array")
+
+	now = now_datetime()
+	created = updated = payloads = normalized_records = 0
+	for item in objects:
+		object_type = item.get("object_type")
+		source_id = item.get("source_id") or item.get("source_guid") or item.get("source_name")
+		if not object_type or not source_id:
+			continue
+		normalized = _normalized_record_from_item(item, object_type, source_id)
+		normalized_hash = item.get("normalized_hash") or _hash_text(normalized)
+		filters = {"connection": connection_id, "object_type": object_type, "source_id": source_id}
+		existing = frappe.get_all(TYD_SOURCE_OBJECT_DOCTYPE, filters=filters, fields=["name"], limit=1)
+		doc = frappe.get_doc(TYD_SOURCE_OBJECT_DOCTYPE, existing[0].name) if existing else frappe.new_doc(TYD_SOURCE_OBJECT_DOCTYPE)
+		if doc.is_new():
+			doc.connection = connection_id
+			doc.object_type = object_type
+			doc.source_id = source_id
+			doc.first_seen_at = now
+			created += 1
+		else:
+			updated += 1
+		doc.source_guid = item.get("source_guid") or ""
+		doc.source_name = item.get("source_name") or ""
+		doc.source_alter_id = item.get("source_alter_id") or ""
+		doc.raw_hash = item.get("raw_hash") or _hash_text(item.get("raw_payload", ""))
+		doc.normalized_hash = normalized_hash
+		doc.sync_status = item.get("sync_status") or "Seen"
+		doc.last_seen_at = now
+		if doc.is_new():
+			doc.insert(ignore_permissions=True)
+		else:
+			doc.save(ignore_permissions=True)
+
+		normalized_text = _json_dumps(normalized)
+		normalized_filters = {
+			"connection": connection_id,
+			"source_object": doc.name,
+			"record_type": object_type,
+			"source_id": source_id,
+		}
+		existing_normalized = frappe.get_all(
+			TYD_NORMALIZED_RECORD_DOCTYPE,
+			filters=normalized_filters,
+			fields=["name"],
+			limit=1,
+		)
+		normalized_doc = (
+			frappe.get_doc(TYD_NORMALIZED_RECORD_DOCTYPE, existing_normalized[0].name)
+			if existing_normalized else frappe.new_doc(TYD_NORMALIZED_RECORD_DOCTYPE)
+		)
+		if normalized_doc.is_new():
+			normalized_doc.update(normalized_filters)
+			normalized_doc.first_seen_at = now
+		normalized_doc.record_name = item.get("source_name") or normalized.get("name") or ""
+		normalized_doc.sync_status = "Active" if not item.get("deleted_at") else "Deleted"
+		normalized_doc.normalized_hash = normalized_hash
+		normalized_doc.extracted_at = now
+		normalized_doc.last_seen_at = now
+		normalized_doc.normalized_json = normalized_text
+		if normalized_doc.is_new():
+			normalized_doc.insert(ignore_permissions=True)
+		else:
+			normalized_doc.save(ignore_permissions=True)
+		normalized_records += 1
+
+		raw_payload = item.get("raw_payload")
+		if raw_payload:
+			payload_doc = frappe.get_doc({
+				"doctype": TYD_RAW_PAYLOAD_DOCTYPE,
+				"connection": connection_id,
+				"source_object": doc.name,
+				"object_type": object_type,
+				"source_id": source_id,
+				"payload_format": item.get("payload_format") or "xml",
+				"payload_hash": doc.raw_hash,
+				"extracted_at": now,
+				"payload": raw_payload if isinstance(raw_payload, str) else _json_dumps(raw_payload),
+			})
+			payload_doc.insert(ignore_permissions=True)
+			payloads += 1
+
+	frappe.db.set_value(TYD_CONNECTION_DOCTYPE, connection_id, "last_sync_at", now, update_modified=True)
+	frappe.db.commit()
+	return {"ok": True, "created": created, "updated": updated, "payloads": payloads, "normalized_records": normalized_records}
 
 
 @frappe.whitelist()

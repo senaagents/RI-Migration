@@ -1,0 +1,176 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:TYD-CONN-{#####}",
+ "creation": "2026-04-16 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "connection_label",
+  "source_type",
+  "status",
+  "owner_user",
+  "bridge_section",
+  "bridge_id",
+  "bridge_token",
+  "pairing_code",
+  "pairing_expires_at",
+  "tally_section",
+  "tally_company_name",
+  "tally_version",
+  "tally_host",
+  "tally_port",
+  "capabilities_json",
+  "sync_section",
+  "last_seen_at",
+  "last_sync_at",
+  "last_error",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "connection_label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Connection Label",
+   "reqd": 1
+  },
+  {
+   "default": "Tally",
+   "fieldname": "source_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Source Type",
+   "options": "Tally\nExcel\nERPNext\nOther",
+   "reqd": 1
+  },
+  {
+   "default": "Pairing",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Draft\nPairing\nActive\nOffline\nSyncing\nError\nDisabled",
+   "reqd": 1
+  },
+  {
+   "fieldname": "owner_user",
+   "fieldtype": "Link",
+   "label": "Owner User",
+   "options": "User"
+  },
+  {
+   "fieldname": "bridge_section",
+   "fieldtype": "Section Break",
+   "label": "Bridge"
+  },
+  {
+   "fieldname": "bridge_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Bridge ID"
+  },
+  {
+   "fieldname": "bridge_token",
+   "fieldtype": "Password",
+   "label": "Bridge Token"
+  },
+  {
+   "fieldname": "pairing_code",
+   "fieldtype": "Data",
+   "label": "Pairing Code",
+   "read_only": 1
+  },
+  {
+   "fieldname": "pairing_expires_at",
+   "fieldtype": "Datetime",
+   "label": "Pairing Expires At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tally_section",
+   "fieldtype": "Section Break",
+   "label": "Tally"
+  },
+  {
+   "fieldname": "tally_company_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tally Company Name"
+  },
+  {
+   "fieldname": "tally_version",
+   "fieldtype": "Data",
+   "label": "Tally Version"
+  },
+  {
+   "fieldname": "tally_host",
+   "fieldtype": "Data",
+   "label": "Tally Host"
+  },
+  {
+   "default": "9000",
+   "fieldname": "tally_port",
+   "fieldtype": "Int",
+   "label": "Tally Port"
+  },
+  {
+   "fieldname": "capabilities_json",
+   "fieldtype": "Code",
+   "label": "Capabilities JSON",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "sync_section",
+   "fieldtype": "Section Break",
+   "label": "Sync"
+  },
+  {
+   "fieldname": "last_seen_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Last Seen At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_sync_at",
+   "fieldtype": "Datetime",
+   "label": "Last Sync At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Last Error"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-16 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Migration",
+ "name": "TYD Source Connection",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

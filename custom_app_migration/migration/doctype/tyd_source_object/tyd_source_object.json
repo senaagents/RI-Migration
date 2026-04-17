@@ -1,0 +1,130 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-04-16 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "connection",
+  "object_type",
+  "source_id",
+  "source_guid",
+  "source_name",
+  "source_alter_id",
+  "sync_status",
+  "hash_section",
+  "raw_hash",
+  "normalized_hash",
+  "time_section",
+  "first_seen_at",
+  "last_seen_at",
+  "deleted_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "connection",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Connection",
+   "options": "TYD Source Connection",
+   "reqd": 1
+  },
+  {
+   "fieldname": "object_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Object Type",
+   "reqd": 1
+  },
+  {
+   "fieldname": "source_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Source ID",
+   "reqd": 1
+  },
+  {
+   "fieldname": "source_guid",
+   "fieldtype": "Data",
+   "label": "Source GUID"
+  },
+  {
+   "fieldname": "source_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Source Name"
+  },
+  {
+   "fieldname": "source_alter_id",
+   "fieldtype": "Data",
+   "label": "Source Alter ID"
+  },
+  {
+   "default": "Seen",
+   "fieldname": "sync_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Sync Status",
+   "options": "Seen\nChanged\nSynced\nError\nDeleted"
+  },
+  {
+   "fieldname": "hash_section",
+   "fieldtype": "Section Break",
+   "label": "Hashes"
+  },
+  {
+   "fieldname": "raw_hash",
+   "fieldtype": "Data",
+   "label": "Raw Hash"
+  },
+  {
+   "fieldname": "normalized_hash",
+   "fieldtype": "Data",
+   "label": "Normalized Hash"
+  },
+  {
+   "fieldname": "time_section",
+   "fieldtype": "Section Break",
+   "label": "Time"
+  },
+  {
+   "fieldname": "first_seen_at",
+   "fieldtype": "Datetime",
+   "label": "First Seen At"
+  },
+  {
+   "fieldname": "last_seen_at",
+   "fieldtype": "Datetime",
+   "label": "Last Seen At"
+  },
+  {
+   "fieldname": "deleted_at",
+   "fieldtype": "Datetime",
+   "label": "Deleted At"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-16 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Migration",
+ "name": "TYD Source Object",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

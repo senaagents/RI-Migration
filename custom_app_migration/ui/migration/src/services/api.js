@@ -82,3 +82,18 @@ export async function getMigrationHistory() {
   const fn = isIframe ? callBridgeAPI : callAPI
   return fn('get_migration_history')
 }
+
+export async function createTydTallyPairing(connectionLabel = 'Tally connection') {
+  const fn = isIframe ? callBridgeAPI : callAPI
+  return fn('create_tyd_tally_pairing', { connection_label: connectionLabel })
+}
+
+export async function listTydConnections() {
+  const fn = isIframe ? callBridgeAPI : callAPI
+  return fn('list_tyd_connections')
+}
+
+export async function getTydConnectionStatus(connectionId) {
+  const fn = isIframe ? callBridgeAPI : callAPI
+  return fn('get_tyd_connection_status', { connection_id: connectionId })
+}

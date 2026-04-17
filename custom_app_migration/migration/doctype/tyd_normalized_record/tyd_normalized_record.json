@@ -1,0 +1,118 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-04-16 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "connection",
+  "source_object",
+  "record_type",
+  "source_id",
+  "record_name",
+  "sync_status",
+  "normalized_hash",
+  "extracted_at",
+  "first_seen_at",
+  "last_seen_at",
+  "normalized_json"
+ ],
+ "fields": [
+  {
+   "fieldname": "connection",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Connection",
+   "options": "TYD Source Connection",
+   "reqd": 1
+  },
+  {
+   "fieldname": "source_object",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Source Object",
+   "options": "TYD Source Object",
+   "reqd": 1
+  },
+  {
+   "fieldname": "record_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Record Type",
+   "reqd": 1
+  },
+  {
+   "fieldname": "source_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Source ID",
+   "reqd": 1
+  },
+  {
+   "fieldname": "record_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Record Name"
+  },
+  {
+   "default": "Active",
+   "fieldname": "sync_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Sync Status",
+   "options": "Active\nDeleted\nError"
+  },
+  {
+   "fieldname": "normalized_hash",
+   "fieldtype": "Data",
+   "label": "Normalized Hash",
+   "read_only": 1
+  },
+  {
+   "fieldname": "extracted_at",
+   "fieldtype": "Datetime",
+   "label": "Extracted At"
+  },
+  {
+   "fieldname": "first_seen_at",
+   "fieldtype": "Datetime",
+   "label": "First Seen At"
+  },
+  {
+   "fieldname": "last_seen_at",
+   "fieldtype": "Datetime",
+   "label": "Last Seen At"
+  },
+  {
+   "fieldname": "normalized_json",
+   "fieldtype": "Code",
+   "label": "Normalized JSON",
+   "options": "JSON",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-16 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Migration",
+ "name": "TYD Normalized Record",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

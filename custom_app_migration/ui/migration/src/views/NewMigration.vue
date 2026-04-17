@@ -9,8 +9,8 @@
 
     <!-- Step 1: Source -->
     <div v-if="step === 0">
-      <h2 class="text-xl font-bold mb-2 text-ink-primary">Where is your data?</h2>
-      <p class="text-ink-muted text-sm mb-8">Choose the system you're migrating from.</p>
+      <h2 class="text-xl font-bold mb-2 text-ink-primary">Connect your data</h2>
+      <p class="text-ink-muted text-sm mb-8">Choose the source system for Talk to Your Data.</p>
 
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
         <SourceCard title="Tally" subtitle="TallyPrime / ERP 9" :selected="source === 'tally'" @select="source = 'tally'" iconBg="bg-blue-50 dark:bg-blue-950">
@@ -29,9 +29,55 @@
 
       <!-- Tally input methods -->
       <div v-if="source === 'tally'" class="space-y-3">
-        <p class="text-xs text-gray-400 dark:text-gray-500 mb-1">Not sure which to choose? Use "Upload Tally Export" -- it's the simplest option.</p>
+        <p class="text-xs text-gray-400 dark:text-gray-500 mb-1">Use the bridge for a fresh analytics replica. Uploads remain available as fallback.</p>
 
-        <!-- Method 1: Upload XML (Recommended) -->
+        <!-- Method 1: Sena Bridge (Recommended) -->
+        <div
+          :class="['rounded-xl border-2 transition-all overflow-hidden', tallyMode === 'bridge' ? 'border-primary-500 bg-white dark:bg-gray-900' : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900']"
+        >
+          <button @click="tallyMode = 'bridge'" class="w-full text-left px-5 py-4 flex items-start gap-3">
+            <div class="flex-shrink-0 mt-0.5">
+              <div :class="['w-5 h-5 rounded-full border-2 flex items-center justify-center', tallyMode === 'bridge' ? 'border-primary-500' : 'border-gray-300 dark:border-gray-600']">
+                <div v-if="tallyMode === 'bridge'" class="w-2.5 h-2.5 rounded-full bg-primary-500" />
+              </div>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="font-semibold text-sm">Sena Tally Bridge</span>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">Recommended</span>
+              </div>
+              <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Install a small Windows bridge beside Tally. It keeps a read-only analytics copy fresh without exposing your Tally port.</p>
+            </div>
+          </button>
+
+          <div v-if="tallyMode === 'bridge'" class="px-5 pb-5 space-y-4">
+            <div class="bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900 rounded-lg p-4">
+              <ol class="space-y-2 text-xs text-gray-600 dark:text-gray-300">
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">1</span><span>Download the Sena Tally Bridge folder on the Windows machine where Tally runs, then run <code class="font-mono text-[10px]">install_bridge_windows.ps1</code>.</span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">2</span><span>Open Tally with your company loaded. The bridge checks <code class="font-mono text-[10px]">localhost:9000</code>.</span></li>
+                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">3</span><span>Create a pairing code here and enter it in the bridge.</span></li>
+              </ol>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3">
+              <button
+                @click="createBridgePairing"
+                :disabled="creatingPairing"
+                class="px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg text-sm font-medium hover:bg-gray-700 dark:hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {{ creatingPairing ? 'Creating...' : bridgePairing ? 'Refresh Pairing Code' : 'Create Pairing Code' }}
+              </button>
+              <div v-if="bridgePairing" class="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-2 bg-gray-50 dark:bg-gray-800">
+                <span class="text-xs text-gray-400 mr-2">Pairing code</span>
+                <span class="font-mono font-bold tracking-wider">{{ bridgePairing.pairing_code }}</span>
+              </div>
+            </div>
+            <p v-if="bridgePairing" class="text-xs text-gray-400 dark:text-gray-500">Connection record: {{ bridgePairing.connection_id }}. The first bridge release will claim this code and start discovery.</p>
+            <p v-if="bridgeError" class="text-xs text-red-500">{{ bridgeError }}</p>
+          </div>
+        </div>
+
+        <!-- Method 2: Upload XML -->
         <div
           :class="['rounded-xl border-2 transition-all overflow-hidden', tallyMode === 'xml' ? 'border-primary-500 bg-white dark:bg-gray-900' : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900']"
         >
@@ -44,7 +90,7 @@
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
                 <span class="font-semibold text-sm">Upload Tally Export</span>
-                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">Recommended</span>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">Fallback</span>
               </div>
               <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Export your data from TallyPrime as XML files and upload them here. No setup required.</p>
             </div>
@@ -110,7 +156,7 @@
           </div>
         </div>
 
-        <!-- Method 2: Live Server -->
+        <!-- Method 3: Live Server -->
         <div
           :class="['rounded-xl border-2 transition-all overflow-hidden', tallyMode === 'live' ? 'border-primary-500 bg-white dark:bg-gray-900' : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900']"
         >
@@ -196,7 +242,7 @@
           </div>
         </div>
 
-        <!-- Method 3: Upload Excel -->
+        <!-- Method 4: Upload Excel -->
         <div
           :class="['rounded-xl border-2 transition-all overflow-hidden', tallyMode === 'excel' ? 'border-primary-500 bg-white dark:bg-gray-900' : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900']"
         >
@@ -253,9 +299,12 @@
     <!-- Step 2: Target -->
     <div v-if="step === 1">
       <h2 class="text-xl font-bold mb-2 text-ink-primary">Where should the data go?</h2>
-      <p class="text-ink-muted text-sm mb-8">Choose the target agent-app and company.</p>
+      <p class="text-ink-muted text-sm mb-8">Choose the target data product.</p>
 
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-8">
+        <SourceCard title="Talk to Your Data" subtitle="Read-only analytics replica" :selected="target === 'tyd'" @select="selectTarget('tyd')" iconBg="bg-green-50 dark:bg-green-950">
+          <template #icon><svg class="w-6 h-6 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5"/><path d="M12 16V8"/><path d="M16 16v-3"/></svg></template>
+        </SourceCard>
         <SourceCard title="SenaERP" subtitle="Accounting, Inventory, CRM" :selected="target === 'erpnext'" @select="selectTarget('erpnext')" iconBg="bg-blue-50 dark:bg-blue-950">
           <template #icon><svg class="w-6 h-6 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></template>
         </SourceCard>
@@ -303,6 +352,11 @@
             <p class="text-xs text-amber-700">Data from Tally will be imported into <strong>{{ selectedCompany.name }}</strong>. This may modify existing accounts, add customers, suppliers, and items.</p>
           </div>
         </div>
+      </div>
+
+      <div v-if="target === 'tyd'" class="bg-white rounded-xl border border-gray-200 p-5">
+        <p class="font-semibold text-sm text-ink-primary">Read-only analytics replica</p>
+        <p class="text-xs text-ink-muted mt-1">Tally remains the source of truth. Sena stores raw payloads, source-object metadata, checkpoints, and normalized analytics records so questions stay fast even when Tally is offline.</p>
       </div>
 
       <div class="flex justify-between mt-8">
@@ -465,7 +519,15 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import StepIndicator from '@/components/StepIndicator.vue'
 import SourceCard from '@/components/SourceCard.vue'
 import FileUploadRow from '@/components/FileUploadRow.vue'
-import { testTallyConnection, fetchTallyData, executeMigration, getMigrationStatus, getTargetCompanies } from '@/services/api.js'
+import {
+  testTallyConnection,
+  fetchTallyData,
+  executeMigration,
+  getMigrationStatus,
+  getTargetCompanies,
+  createTydTallyPairing,
+  getTydConnectionStatus,
+} from '@/services/api.js'
 
 const stepLabels = ['Source', 'Target', 'Preview', 'Migrate', 'Validate']
 const step = ref(0)
@@ -474,7 +536,12 @@ onMounted(() => { headerMounted.value = !!document.querySelector('header .flex-1
 
 // Step 1: Source
 const source = ref('')
-const tallyMode = ref('xml')
+const tallyMode = ref('bridge')
+
+// Bridge mode
+const bridgePairing = ref(null)
+const creatingPairing = ref(false)
+const bridgeError = ref('')
 
 // XML upload mode
 const mastersFile = ref(null)
@@ -499,11 +566,24 @@ const showExcelInstructions = ref(false)
 
 const canProceedFromSource = computed(() => {
   if (source.value !== 'tally') return false
+  if (tallyMode.value === 'bridge') return !!bridgePairing.value
   if (tallyMode.value === 'xml') return !!mastersFile.value
   if (tallyMode.value === 'live') return connectionStatus.value === 'ok'
   if (tallyMode.value === 'excel') return !!excelCoA.value
   return false
 })
+
+async function createBridgePairing() {
+  creatingPairing.value = true
+  bridgeError.value = ''
+  try {
+    bridgePairing.value = await createTydTallyPairing('Tally analytics replica')
+  } catch (e) {
+    bridgeError.value = e.message || 'Could not create pairing code'
+  } finally {
+    creatingPairing.value = false
+  }
+}
 
 function formatFileSize(bytes) {
   if (bytes < 1024) return bytes + ' B'
@@ -560,12 +640,33 @@ const companyName = computed(() => selectedCompany.value?.name || '')
 const companyAbbr = computed(() => selectedCompany.value?.abbr || '')
 
 const canProceedFromTarget = computed(() => {
+  if (target.value === 'tyd') return tallyMode.value === 'bridge' && !!bridgePairing.value
   return target.value === 'erpnext' && !!selectedCompany.value
 })
 
 async function fetchPreview() {
   fetchingPreview.value = true
   try {
+    if (tallyMode.value === 'bridge') {
+      const status = await getTydConnectionStatus(bridgePairing.value.connection_id)
+      const counts = status.object_counts || []
+      const normalizedCounts = status.normalized_counts || []
+      const countFor = (objectType) => counts
+        .filter(row => row.object_type === objectType)
+        .reduce((sum, row) => sum + Number(row.count || 0), 0)
+      const normalizedTotal = normalizedCounts
+        .reduce((sum, row) => sum + Number(row.count || 0), 0)
+      previewEntities.value = [
+        { key: 'connection', label: 'Bridge Connection', count: status.connection?.status === 'Active' ? 1 : 0, enabled: true, expanded: false,
+          samples: [{ name: status.connection?.status || 'Waiting for bridge claim' }] },
+        { key: 'analytics', label: 'Analytics Records', count: normalizedTotal, enabled: true, expanded: false, samples: [] },
+        { key: 'ledgers', label: 'Synced Ledgers', count: countFor('Ledger'), enabled: true, expanded: false, samples: [] },
+        { key: 'vouchers', label: 'Synced Vouchers', count: countFor('Voucher'), enabled: true, expanded: false, samples: [] },
+        { key: 'items', label: 'Synced Stock Items', count: countFor('Stock Item'), enabled: true, expanded: false, samples: [] },
+      ]
+      step.value = 2
+      return
+    }
     const result = await fetchTallyData(tallyHost.value, tallyPort.value)
     previewEntities.value = [
       { key: 'groups', label: 'Account Groups', count: result.groups_count || 0, enabled: true, expanded: false,
@@ -615,6 +716,16 @@ async function startMigration() {
   addLog('Starting migration...')
 
   try {
+    if (tallyMode.value === 'bridge') {
+      addLog('Bridge pairing created. Waiting for bridge discovery worker...')
+      overallProgress.value = 15
+      migrationTasks.value = [
+        { label: 'Pairing code created', status: 'done', detail: bridgePairing.value.pairing_code },
+        { label: 'Bridge claim', status: 'pending', detail: 'Install bridge and enter the code' },
+        { label: 'Discovery sync', status: 'pending', detail: 'Ledgers, vouchers, items' },
+      ]
+      return
+    }
     const result = await executeMigration(
       tallyHost.value, tallyPort.value,
       companyName.value, companyAbbr.value,
