@@ -40,6 +40,14 @@ _PREFIX_ROOT_TYPE = {
 	"I": "Income",
 }
 
+COUNTRY_MAP = {
+	"United States of America": "United States",
+}
+
+_SKIP_ACCOUNT_LEDGER_NAMES = {
+	"profit & loss a/c",
+}
+
 # Tally UOM → ERPNext UOM mapping
 UOM_MAP = {
 	"Nos": "Nos", "Nos.": "Nos", "nos": "Nos", "NO": "Nos", "No": "Nos",
@@ -122,6 +130,11 @@ def _account_name(name, company_abbr):
 	return f"{name} - {company_abbr}"
 
 
+def _normalize_country(country):
+	country = country or "India"
+	return COUNTRY_MAP.get(country, country)
+
+
 def transform_accounts(groups, ledgers, company_name, company_abbr):
 	"""Transform Tally groups and ledgers into ERPNext Account dicts.
 
@@ -148,6 +161,12 @@ def transform_accounts(groups, ledgers, company_name, company_abbr):
 
 	# Ledgers (is_group=0), skipping customers/suppliers
 	for led in ledgers:
+		ledger_name = led["name"]
+		if ledger_name.lower().strip() in _SKIP_ACCOUNT_LEDGER_NAMES:
+			continue
+		if ledger_name in groups_by_name:
+			continue
+
 		classification = classify_ledger(led, groups_by_name)
 		if classification != "account":
 			continue
@@ -156,7 +175,7 @@ def transform_accounts(groups, ledgers, company_name, company_abbr):
 		report_type = "Balance Sheet" if root_type in ("Asset", "Liability", "Equity") else "Profit and Loss"
 
 		account_type = ""
-		name_lower = led["name"].lower()
+		name_lower = ledger_name.lower()
 		parent_lower = parent.lower()
 		if "bank" in parent_lower or "bank" in name_lower:
 			account_type = "Bank"
@@ -179,7 +198,7 @@ def transform_accounts(groups, ledgers, company_name, company_abbr):
 
 		accounts.append({
 			"doctype": "Account",
-			"account_name": led["name"],
+			"account_name": ledger_name,
 			"parent_account": _account_name(parent, company_abbr) if parent else "",
 			"company": company_name,
 			"is_group": 0,
@@ -261,7 +280,7 @@ def transform_suppliers(ledgers, groups):
 			"supplier_name": led.get("mailing_name") or led["name"],
 			"supplier_type": "Company" if "pvt" in led["name"].lower() or "ltd" in led["name"].lower() else "Individual",
 			"supplier_group": supplier_group,
-			"country": led.get("country", "India"),
+			"country": _normalize_country(led.get("country")),
 			"gst_category": gst_category,
 			"gstin": led.get("gstin", ""),
 			"pan": led.get("pan", ""),

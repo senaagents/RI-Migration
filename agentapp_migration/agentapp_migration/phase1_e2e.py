@@ -1,4 +1,4 @@
-"""Phase 1 site smoke test for Talk to Your Data.
+"""Phase 1 site smoke test for Integration source connections.
 
 Run after `bench --site dev.localhost migrate`:
 
@@ -18,8 +18,8 @@ from agentapp_migration.agentapp_migration import api
 def run():
 	"""Exercise the real DocTypes and bridge control-plane APIs on the site DB."""
 	label = f"Phase 1 E2E Tally {now_datetime().strftime('%Y%m%d%H%M%S')}"
-	pairing = api.create_tyd_tally_pairing(label)
-	claim = api.claim_tyd_bridge_pairing(
+	pairing = api.create_integration_tally_pairing(label)
+	claim = api.claim_integration_bridge_pairing(
 		pairing_code=pairing["pairing_code"],
 		bridge_id="phase1-e2e-bridge",
 		capabilities_json=json.dumps({
@@ -65,11 +65,11 @@ def run():
 			},
 		]),
 	)
-	status = api.get_tyd_connection_status(claim["connection_id"])
-	checkpoint_count = frappe.db.count(api.TYD_CHECKPOINT_DOCTYPE, {"connection": claim["connection_id"]})
-	object_count = frappe.db.count(api.TYD_SOURCE_OBJECT_DOCTYPE, {"connection": claim["connection_id"]})
-	payload_count = frappe.db.count(api.TYD_RAW_PAYLOAD_DOCTYPE, {"connection": claim["connection_id"]})
-	normalized_count = frappe.db.count(api.TYD_NORMALIZED_RECORD_DOCTYPE, {"connection": claim["connection_id"]})
+	status = api.get_integration_connection_status(claim["connection_id"])
+	checkpoint_count = frappe.db.count(api.INTEGRATION_CHECKPOINT_DOCTYPE, {"connection": claim["connection_id"]})
+	object_count = frappe.db.count(api.INTEGRATION_SOURCE_OBJECT_DOCTYPE, {"connection": claim["connection_id"]})
+	payload_count = frappe.db.count(api.INTEGRATION_RAW_PAYLOAD_DOCTYPE, {"connection": claim["connection_id"]})
+	normalized_count = frappe.db.count(api.INTEGRATION_NORMALIZED_RECORD_DOCTYPE, {"connection": claim["connection_id"]})
 
 	return {
 		"ok": True,

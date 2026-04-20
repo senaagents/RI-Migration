@@ -18,7 +18,7 @@
     <span
       v-if="disabled"
       class="absolute top-2 right-2 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400"
-    >Coming Soon</span>
+    >{{ disabledLabel }}</span>
     <span
       v-if="selected"
       class="absolute top-2 right-2 w-5 h-5 rounded-full bg-primary-500 flex items-center justify-center"
@@ -34,6 +34,7 @@ defineProps({
   subtitle: String,
   selected: Boolean,
   disabled: Boolean,
+  disabledLabel: { type: String, default: 'Coming Soon' },
   iconBg: { type: String, default: 'bg-gray-100 dark:bg-gray-800' },
 })
 defineEmits(['select'])

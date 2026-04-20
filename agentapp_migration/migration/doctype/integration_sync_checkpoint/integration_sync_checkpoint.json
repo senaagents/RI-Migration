@@ -24,7 +24,7 @@
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Connection",
-   "options": "TYD Source Connection",
+   "options": "Integration Source Connection",
    "reqd": 1
   },
   {
@@ -97,7 +97,7 @@
  "modified": "2026-04-16 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Migration",
- "name": "TYD Sync Checkpoint",
+ "name": "Integration Sync Checkpoint",
  "owner": "Administrator",
  "permissions": [
   {

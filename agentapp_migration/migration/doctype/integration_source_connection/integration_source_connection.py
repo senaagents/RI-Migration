@@ -4,7 +4,7 @@ import frappe
 from frappe.model.document import Document
 
 
-class TYDSourceConnection(Document):
+class IntegrationSourceConnection(Document):
 	def validate(self):
 		if self.capabilities_json:
 			try:

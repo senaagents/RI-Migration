@@ -6,7 +6,7 @@ This tests the bridge orchestration without requiring Tally or Frappe:
 - pairing claim
 - company probe
 - heartbeat transitions
-- three stream syncs
+- multi-stream syncs
 - checkpoint writes
 - source object ingest with raw payload hashes
 """
@@ -24,14 +24,14 @@ import sena_tally_bridge as bridge
 
 class FakeSena:
 	def __init__(self):
-		self.connection_id = "TYD-CONN-00001"
+		self.connection_id = "INT-CONN-00001"
 		self.bridge_token = "bridge-secret"
 		self.heartbeats = []
 		self.checkpoints = []
 		self.ingested = []
 
 	def post_json(self, server, method, payload, timeout=120):
-		if method == "claim_tyd_bridge_pairing":
+		if method == "claim_integration_bridge_pairing":
 			assert payload["pairing_code"] == "PAIR1234"
 			assert payload["bridge_id"] == "bridge-e2e"
 			return {
@@ -61,7 +61,7 @@ def fake_tally_response(config, xml_payload):
 	if "<TYPE>Company</TYPE>" in xml_payload:
 		return """
 		<ENVELOPE><BODY><DATA><COLLECTION>
-		  <COMPANY><NAME>Bridge Test Co</NAME></COMPANY>
+		  <COMPANY NAME="Bridge Test Co"><GUID>company-bridge</GUID><NAME>Bridge Test Co</NAME><BASICCURRENCYCODE>INR</BASICCURRENCYCODE></COMPANY>
 		</COLLECTION></DATA></BODY></ENVELOPE>
 		"""
 	if "<TYPE>Ledger</TYPE>" in xml_payload:
@@ -83,7 +83,32 @@ def fake_tally_response(config, xml_payload):
 		  <STOCKITEM NAME="Widget"><GUID>stock-widget</GUID><ALTERID>7</ALTERID></STOCKITEM>
 		</COLLECTION></DATA></BODY></ENVELOPE>
 		"""
-	raise AssertionError(f"Unexpected Tally request: {xml_payload}")
+	if "<ID>Trial Balance</ID>" in xml_payload:
+		return """
+		<ENVELOPE>
+		  <DSPACCNAME><DSPDISPNAME>Cash</DSPDISPNAME></DSPACCNAME>
+		  <DSPACCINFO><DSPCLDRAMT><DSPCLDRAMTA>125.00</DSPCLDRAMTA></DSPCLDRAMT><DSPCLCRAMT><DSPCLCRAMTA></DSPCLCRAMTA></DSPCLCRAMT></DSPACCINFO>
+		  <DSPACCNAME><DSPDISPNAME>Sales</DSPDISPNAME></DSPACCNAME>
+		  <DSPACCINFO><DSPCLDRAMT><DSPCLDRAMTA></DSPCLDRAMTA></DSPCLDRAMT><DSPCLCRAMT><DSPCLCRAMTA>250.00</DSPCLCRAMTA></DSPCLCRAMT></DSPACCINFO>
+		</ENVELOPE>
+		"""
+	if "<ID>Stock Summary</ID>" in xml_payload:
+		return """
+		<ENVELOPE>
+		  <DSPACCNAME><DSPDISPNAME>Widget</DSPDISPNAME></DSPACCNAME>
+		  <DSPSTKINFO><DSPSTKCL><DSPCLQTY>5 Nos</DSPCLQTY><DSPCLRATE>12.00</DSPCLRATE><DSPCLAMTA>60.00</DSPCLAMTA></DSPSTKCL></DSPSTKINFO>
+		</ENVELOPE>
+		"""
+	if "<ID>Day Book</ID>" in xml_payload:
+		return """
+		<ENVELOPE>
+		  <VOUCHER VCHTYPE="Sales"><GUID>daybook-1</GUID><DATE>20260401</DATE><VOUCHERNUMBER>1</VOUCHERNUMBER><PARTYLEDGERNAME>Cash</PARTYLEDGERNAME><NARRATION>Sale one</NARRATION></VOUCHER>
+		  <VOUCHER VCHTYPE="Receipt"><GUID>daybook-2</GUID><DATE>20260402</DATE><VOUCHERNUMBER>2</VOUCHERNUMBER><PARTYLEDGERNAME>Acme</PARTYLEDGERNAME><NARRATION>Receipt two</NARRATION></VOUCHER>
+		</ENVELOPE>
+		"""
+	if "<ID>Ledger Outstandings</ID>" in xml_payload:
+		raise RuntimeError("Ledger Outstandings not available in test stub")
+	return "<ENVELOPE><BODY><DATA><COLLECTION></COLLECTION></DATA></BODY></ENVELOPE>"
 
 
 def main():
@@ -106,28 +131,38 @@ def main():
 		bridge.post_json = original_post_json
 		bridge.post_tally_xml = original_post_tally_xml
 
-	assert result == {
-		"connection_id": "TYD-CONN-00001",
-		"company": "Bridge Test Co",
-		"counts": {"Ledger": 2, "Group": 1, "Stock Item": 1},
-	}
+	assert result["connection_id"] == "INT-CONN-00001"
+	assert result["company"] == "Bridge Test Co"
+	assert result["counts"]["Company"] == 1
+	assert result["counts"]["Ledger"] == 2
+	assert result["counts"]["Group"] == 1
+	assert result["counts"]["Stock Item"] == 1
+	assert result["counts"]["Trial Balance Entry"] == 2
+	assert result["counts"]["Stock Summary Item"] == 1
+	assert result["counts"]["Day Book Voucher"] == 2
+	assert result["counts"]["Outstanding Snapshot"] == 0
+	assert "Outstanding Snapshot" in result["failures"]
 	assert [item["status"] for item in fake.heartbeats] == ["Syncing", "Active"]
 	assert fake.heartbeats[0]["tally_company_name"] == "Bridge Test Co"
-	assert len(fake.checkpoints) == 6
-	assert {(row["stream_name"], row["status"]) for row in fake.checkpoints} == {
-		("tally_ledgers", "Running"),
-		("tally_ledgers", "Success"),
-		("tally_groups", "Running"),
-		("tally_groups", "Success"),
-		("tally_stock_items", "Running"),
-		("tally_stock_items", "Success"),
-	}
-	assert len(fake.ingested) == 4
+	assert len(fake.checkpoints) == len(bridge.TALLY_STREAMS) * 2
+	for stream in bridge.TALLY_STREAMS:
+		assert (stream["stream_name"], "Running") in {(row["stream_name"], row["status"]) for row in fake.checkpoints}
+		if stream["stream_name"] == "tally_outstanding":
+			assert (stream["stream_name"], "Error") in {(row["stream_name"], row["status"]) for row in fake.checkpoints}
+		else:
+			assert (stream["stream_name"], "Success") in {(row["stream_name"], row["status"]) for row in fake.checkpoints}
+	assert len(fake.ingested) == 10
 	assert {item["source_id"] for item in fake.ingested} == {
+		"company-bridge",
 		"ledger-cash",
 		"ledger-sales",
 		"group-assets",
 		"stock-widget",
+		"tally_trial_balance:Cash",
+		"tally_trial_balance:Sales",
+		"tally_stock_summary:Widget",
+		"tally_day_book:daybook-1",
+		"tally_day_book:daybook-2",
 	}
 
 	print(json.dumps({"ok": True, **result, "ingested": len(fake.ingested)}))

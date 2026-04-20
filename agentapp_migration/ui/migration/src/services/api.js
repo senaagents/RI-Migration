@@ -1,4 +1,5 @@
 const API_BASE = '/api/method/agentapp_migration.agentapp_migration.api'
+let csrfToken = ''
 
 function getCSRF() {
   // Try reading from cookie
@@ -9,18 +10,59 @@ function getCSRF() {
   return ''
 }
 
-async function callAPI(method, params = {}) {
-  const res = await fetch(`${API_BASE}.${method}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Frappe-CSRF-Token': getCSRF(),
-    },
-    body: JSON.stringify(params),
+async function getCSRFToken() {
+  const existing = getCSRF()
+  if (existing) return existing
+  if (csrfToken) return csrfToken
+
+  const res = await fetch(`${API_BASE}.get_csrf_token`, {
+    method: 'GET',
+    credentials: 'same-origin',
   })
   const data = await res.json()
-  if (data.exc) throw new Error(data.exc)
+  if (!res.ok || data.exc || data.exception || data.exc_type) {
+    throw new Error(extractFrappeError(data) || `get_csrf_token failed with HTTP ${res.status}`)
+  }
+  csrfToken = data.message || ''
+  return csrfToken
+}
+
+async function callAPI(method, params = {}, options = {}) {
+  const httpMethod = options.httpMethod || 'POST'
+  const headers = { 'Content-Type': 'application/json' }
+  const fetchOptions = {
+    method: httpMethod,
+    headers,
+    credentials: 'same-origin',
+  }
+  if (httpMethod !== 'GET') {
+    headers['X-Frappe-CSRF-Token'] = await getCSRFToken()
+    fetchOptions.body = JSON.stringify(params)
+  }
+
+  const res = await fetch(`${API_BASE}.${method}`, {
+    ...fetchOptions,
+  })
+  const data = await res.json()
+  if (!res.ok || data.exc || data.exception || data.exc_type) {
+    throw new Error(extractFrappeError(data) || `${method} failed with HTTP ${res.status}`)
+  }
   return data.message || data
+}
+
+function extractFrappeError(data) {
+  if (!data) return ''
+  if (data.message && typeof data.message === 'string') return data.message
+  if (data._server_messages) {
+    try {
+      const messages = JSON.parse(data._server_messages)
+      const first = messages[0] ? JSON.parse(messages[0]) : null
+      if (first?.message) return first.message.replace(/<[^>]*>/g, '')
+    } catch {
+      // Fall through to lower fidelity error fields.
+    }
+  }
+  return data.exception || data.exc || data.exc_type || ''
 }
 
 // If running inside Sena iframe, use the bridge API proxy
@@ -56,6 +98,21 @@ export async function getTargetCompanies() {
   return fn('get_target_companies')
 }
 
+export async function getIntegrationSourceTypes() {
+  if (isIframe) return callBridgeAPI('get_integration_source_types')
+  return callAPI('get_integration_source_types', {}, { httpMethod: 'GET' })
+}
+
+export async function getMigrationTargetTypes() {
+  if (isIframe) return callBridgeAPI('get_migration_target_types')
+  return callAPI('get_migration_target_types', {}, { httpMethod: 'GET' })
+}
+
+export async function getMigrationTargetSchema(targetKey) {
+  const fn = isIframe ? callBridgeAPI : callAPI
+  return fn('get_migration_target_schema', { target_key: targetKey })
+}
+
 export async function testTallyConnection(host, port) {
   const fn = isIframe ? callBridgeAPI : callAPI
   return fn('test_tally_connection', { host, port })
@@ -83,17 +140,67 @@ export async function getMigrationHistory() {
   return fn('get_migration_history')
 }
 
-export async function createTydTallyPairing(connectionLabel = 'Tally connection') {
+export async function createIntegrationTallyPairing(connectionLabel = 'Tally connection') {
   const fn = isIframe ? callBridgeAPI : callAPI
-  return fn('create_tyd_tally_pairing', { connection_label: connectionLabel })
+  return fn('create_integration_tally_pairing', { connection_label: connectionLabel })
 }
 
-export async function listTydConnections() {
+export async function createSapHanaDiscoverySnapshot(connectionLabel = 'SAP HANA source') {
   const fn = isIframe ? callBridgeAPI : callAPI
-  return fn('list_tyd_connections')
+  return fn('create_sap_hana_discovery_snapshot', { connection_label: connectionLabel })
 }
 
-export async function getTydConnectionStatus(connectionId) {
+export async function extractSapHanaMasterData(connectionId) {
   const fn = isIframe ? callBridgeAPI : callAPI
-  return fn('get_tyd_connection_status', { connection_id: connectionId })
+  return fn('extract_sap_hana_master_data', { connection_id: connectionId })
+}
+
+export async function planSapHanaMasterMigration({ connectionId, company, selectedRecordTypes = [] } = {}) {
+  const fn = isIframe ? callBridgeAPI : callAPI
+  return fn('plan_sap_hana_master_migration', {
+    connection_id: connectionId,
+    company,
+    selected_record_types_json: JSON.stringify(selectedRecordTypes),
+  })
+}
+
+export async function listIntegrationConnections() {
+  const fn = isIframe ? callBridgeAPI : callAPI
+  return fn('list_integration_connections')
+}
+
+export async function deleteIntegrationConnection(connectionId) {
+  const fn = isIframe ? callBridgeAPI : callAPI
+  return fn('delete_integration_connection', { connection_id: connectionId })
+}
+
+export async function getIntegrationConnectionStatus(connectionId) {
+  const fn = isIframe ? callBridgeAPI : callAPI
+  return fn('get_integration_connection_status', { connection_id: connectionId })
+}
+
+export async function getIntegrationSourceSchema({ connectionId = '', sourceKey = '', sampleLimit = 5 } = {}) {
+  const fn = isIframe ? callBridgeAPI : callAPI
+  return fn('get_integration_source_schema', {
+    connection_id: connectionId,
+    source_key: sourceKey,
+    sample_limit: sampleLimit,
+  })
+}
+
+export async function queryIntegrationRecords({
+  connectionId,
+  recordType = '',
+  filters = [],
+  fields = [],
+  limit = 50,
+} = {}) {
+  const fn = isIframe ? callBridgeAPI : callAPI
+  return fn('query_integration_records', {
+    connection_id: connectionId,
+    record_type: recordType,
+    filters_json: JSON.stringify(filters),
+    fields_json: JSON.stringify(fields),
+    limit,
+  })
 }

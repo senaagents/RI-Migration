@@ -6,19 +6,16 @@
  "engine": "InnoDB",
  "field_order": [
   "connection",
-  "object_type",
+  "source_object",
+  "record_type",
   "source_id",
-  "source_guid",
-  "source_name",
-  "source_alter_id",
+  "record_name",
   "sync_status",
-  "hash_section",
-  "raw_hash",
   "normalized_hash",
-  "time_section",
+  "extracted_at",
   "first_seen_at",
   "last_seen_at",
-  "deleted_at"
+  "normalized_json"
  ],
  "fields": [
   {
@@ -26,14 +23,22 @@
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Connection",
-   "options": "TYD Source Connection",
+   "options": "Integration Source Connection",
    "reqd": 1
   },
   {
-   "fieldname": "object_type",
+   "fieldname": "source_object",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Source Object",
+   "options": "Integration Source Object",
+   "reqd": 1
+  },
+  {
+   "fieldname": "record_type",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "Object Type",
+   "label": "Record Type",
    "reqd": 1
   },
   {
@@ -44,48 +49,29 @@
    "reqd": 1
   },
   {
-   "fieldname": "source_guid",
-   "fieldtype": "Data",
-   "label": "Source GUID"
-  },
-  {
-   "fieldname": "source_name",
+   "fieldname": "record_name",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "Source Name"
+   "label": "Record Name"
   },
   {
-   "fieldname": "source_alter_id",
-   "fieldtype": "Data",
-   "label": "Source Alter ID"
-  },
-  {
-   "default": "Seen",
+   "default": "Active",
    "fieldname": "sync_status",
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Sync Status",
-   "options": "Seen\nChanged\nSynced\nError\nDeleted"
-  },
-  {
-   "fieldname": "hash_section",
-   "fieldtype": "Section Break",
-   "label": "Hashes"
-  },
-  {
-   "fieldname": "raw_hash",
-   "fieldtype": "Data",
-   "label": "Raw Hash"
+   "options": "Active\nDeleted\nError"
   },
   {
    "fieldname": "normalized_hash",
    "fieldtype": "Data",
-   "label": "Normalized Hash"
+   "label": "Normalized Hash",
+   "read_only": 1
   },
   {
-   "fieldname": "time_section",
-   "fieldtype": "Section Break",
-   "label": "Time"
+   "fieldname": "extracted_at",
+   "fieldtype": "Datetime",
+   "label": "Extracted At"
   },
   {
    "fieldname": "first_seen_at",
@@ -98,9 +84,11 @@
    "label": "Last Seen At"
   },
   {
-   "fieldname": "deleted_at",
-   "fieldtype": "Datetime",
-   "label": "Deleted At"
+   "fieldname": "normalized_json",
+   "fieldtype": "Code",
+   "label": "Normalized JSON",
+   "options": "JSON",
+   "reqd": 1
   }
  ],
  "index_web_pages_for_search": 1,
@@ -108,7 +96,7 @@
  "modified": "2026-04-16 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Migration",
- "name": "TYD Source Object",
+ "name": "Integration Normalized Source Record",
  "owner": "Administrator",
  "permissions": [
   {

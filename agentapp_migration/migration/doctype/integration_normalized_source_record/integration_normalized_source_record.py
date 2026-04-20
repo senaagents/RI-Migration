@@ -4,7 +4,7 @@ import frappe
 from frappe.model.document import Document
 
 
-class TYDNormalizedRecord(Document):
+class IntegrationNormalizedSourceRecord(Document):
 	def validate(self):
 		if self.normalized_json:
 			try:

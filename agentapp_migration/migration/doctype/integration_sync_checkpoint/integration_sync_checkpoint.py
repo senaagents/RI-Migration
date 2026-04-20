@@ -1,6 +1,6 @@
 from frappe.model.document import Document
 
 
-class TYDSourceObject(Document):
+class IntegrationSyncCheckpoint(Document):
 	pass
 

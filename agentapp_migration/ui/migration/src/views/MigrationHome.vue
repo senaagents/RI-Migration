@@ -9,9 +9,9 @@
           <path d="M2 12l10 5 10-5"/>
         </svg>
       </div>
-      <h2 class="text-2xl font-bold mb-2">Talk to Your Data</h2>
+      <h2 class="text-2xl font-bold mb-2">Migration</h2>
       <p class="text-gray-500 dark:text-gray-400 max-w-md mx-auto">
-        Connect business systems and ask questions over fresh, synced data.
+        Source means connect, snapshot, and normalize for preview. Migrate means write the approved mapping into the target.
       </p>
     </div>
 
@@ -25,18 +25,18 @@
           <line x1="12" y1="5" x2="12" y2="19"/>
           <line x1="5" y1="12" x2="19" y2="12"/>
         </svg>
-        Connect Data
+        Connect Source
       </router-link>
     </div>
 
     <!-- Connections -->
     <div>
-      <h3 class="text-sm font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-4">Connected Sources</h3>
+      <h3 class="text-sm font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-4">Source Connections</h3>
 
       <div v-if="loading" class="text-center py-8 text-gray-400">Loading...</div>
 
       <div v-else-if="!history.length" class="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-8 text-center">
-        <p class="text-gray-400 dark:text-gray-500">No connected sources yet. Connect Tally to start building your analytics replica.</p>
+        <p class="text-gray-400 dark:text-gray-500">No source connections yet. Connect Tally to start snapshot and preview discovery.</p>
       </div>
 
       <div v-else class="space-y-3">
@@ -71,7 +71,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { listTydConnections } from '@/services/api.js'
+import { listIntegrationConnections } from '@/services/api.js'
 
 const loading = ref(false)
 const history = ref([])
@@ -87,7 +87,7 @@ function isBroken(status) {
 onMounted(async () => {
   loading.value = true
   try {
-    history.value = await listTydConnections()
+    history.value = await listIntegrationConnections()
   } catch (e) {
     history.value = []
   } finally {

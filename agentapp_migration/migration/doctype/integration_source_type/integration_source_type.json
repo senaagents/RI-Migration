@@ -1,0 +1,127 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:source_key",
+ "creation": "2026-04-17 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "source_key",
+  "title",
+  "subtitle",
+  "enabled",
+  "implementation_status",
+  "sort_order",
+  "description",
+  "ui_section",
+  "icon_label",
+  "icon_bg_class",
+  "icon_text_class",
+  "capabilities_json",
+  "methods_json"
+ ],
+ "fields": [
+  {
+   "fieldname": "source_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Source Key",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title",
+   "reqd": 1
+  },
+  {
+   "fieldname": "subtitle",
+   "fieldtype": "Data",
+   "label": "Subtitle"
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "default": "Design",
+   "fieldname": "implementation_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Implementation Status",
+   "options": "Ready\nDesign\nComing Soon"
+  },
+  {
+   "default": "0",
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "Sort Order"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "ui_section",
+   "fieldtype": "Section Break",
+   "label": "UI"
+  },
+  {
+   "fieldname": "icon_label",
+   "fieldtype": "Data",
+   "label": "Icon Label"
+  },
+  {
+   "fieldname": "icon_bg_class",
+   "fieldtype": "Data",
+   "label": "Icon Background Class"
+  },
+  {
+   "fieldname": "icon_text_class",
+   "fieldtype": "Data",
+   "label": "Icon Text Class"
+  },
+  {
+   "fieldname": "capabilities_json",
+   "fieldtype": "Code",
+   "label": "Capabilities JSON",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "methods_json",
+   "fieldtype": "Code",
+   "label": "Methods JSON",
+   "options": "JSON"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-17 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Migration",
+ "name": "Integration Source Type",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "sort_order",
+ "sort_order": "ASC",
+ "states": []
+}

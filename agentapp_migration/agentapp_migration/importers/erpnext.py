@@ -16,6 +16,7 @@ class ERPNextImporter:
 	def __init__(self, company_name, dry_run=False):
 		self.company = company_name
 		self.dry_run = dry_run
+		self.company_abbr = frappe.db.get_value("Company", self.company, "abbr") or self.company[:2].upper()
 		self.results = {
 			"created": [],
 			"skipped": [],
@@ -44,9 +45,21 @@ class ERPNextImporter:
 		doctype = doc_dict.get("doctype")
 		# Remove internal _tally_* keys before inserting
 		clean = {k: v for k, v in doc_dict.items() if not k.startswith("_tally_")}
+		name = (
+			clean.get("name")
+			or clean.get("account_name")
+			or clean.get("customer_name")
+			or clean.get("supplier_name")
+			or clean.get("item_code")
+			or clean.get("item_group_name")
+			or clean.get("warehouse_name")
+			or clean.get("customer_group_name")
+			or clean.get("supplier_group_name")
+			or "?"
+		)
 
 		if self.dry_run:
-			self.results["created"].append({"doctype": doctype, "name": clean.get("name", clean.get("account_name", clean.get("item_code", "?")))})
+			self.results["created"].append({"doctype": doctype, "name": name})
 			return True
 
 		try:
@@ -57,11 +70,9 @@ class ERPNextImporter:
 			self.results["created"].append({"doctype": doctype, "name": doc.name})
 			return True
 		except frappe.DuplicateEntryError:
-			name = clean.get("name", clean.get("account_name", clean.get("item_code", "?")))
 			self.results["skipped"].append({"doctype": doctype, "name": name, "reason": "duplicate"})
 			return False
 		except Exception as exc:
-			name = clean.get("name", clean.get("account_name", clean.get("item_code", "?")))
 			self.results["errors"].append({"doctype": doctype, "name": name, "error": str(exc)})
 			logger.warning("Failed to insert %s %s: %s", doctype, name, exc)
 			return False
@@ -74,11 +85,23 @@ class ERPNextImporter:
 		# Separate groups and leaves
 		groups = [a for a in accounts if a.get("is_group")]
 		leaves = [a for a in accounts if not a.get("is_group")]
+		group_by_name = {
+			a.get("name") or f"{a.get('account_name')} - {self.company_abbr}": a
+			for a in groups
+			if a.get("account_name")
+		}
 
-		# Sort groups by depth (root first): count segments in parent_account
+		# Sort groups by actual parent chain depth so child groups do not race
+		# their parents on a fresh company import.
 		def depth(acc):
-			parent = acc.get("parent_account", "")
-			return parent.count(" - ") if parent else 0
+			parent = acc.get("parent_account")
+			visited = set()
+			value = 0
+			while parent and parent not in visited and parent in group_by_name:
+				visited.add(parent)
+				value += 1
+				parent = group_by_name[parent].get("parent_account")
+			return value
 
 		groups.sort(key=depth)
 
@@ -103,7 +126,8 @@ class ERPNextImporter:
 			except Exception as exc:
 				logger.warning("Failed to rebuild Account tree: %s", exc)
 
-		frappe.db.commit()
+		if not self.dry_run:
+			frappe.db.commit()
 
 	def _import_customer_groups(self, customers):
 		"""Create Customer Group docs for unique groups referenced by customers."""
@@ -222,10 +246,14 @@ class ERPNextImporter:
 		with_parent = [wh for wh in warehouses if wh.get("parent_warehouse")]
 
 		for wh in no_parent:
+			if not wh.get("warehouse_name"):
+				continue
 			if not frappe.db.exists("Warehouse", {"warehouse_name": wh["warehouse_name"], "company": self.company}):
 				self._insert_doc(wh)
 
 		for wh in with_parent:
+			if not wh.get("warehouse_name"):
+				continue
 			# If parent warehouse doesn't exist, clear the parent reference
 			if wh.get("parent_warehouse") and not frappe.db.exists("Warehouse", wh["parent_warehouse"]):
 				wh["parent_warehouse"] = ""
@@ -239,6 +267,8 @@ class ERPNextImporter:
 		"""Import Customers with optional Address creation."""
 		for c in customers:
 			customer_name = c.get("customer_name", "")
+			if not customer_name:
+				continue
 			if frappe.db.exists("Customer", {"customer_name": customer_name}):
 				self.results["skipped"].append({"doctype": "Customer", "name": customer_name, "reason": "duplicate"})
 				continue
@@ -265,6 +295,8 @@ class ERPNextImporter:
 		"""Import Suppliers with optional Address creation."""
 		for s in suppliers:
 			supplier_name = s.get("supplier_name", "")
+			if not supplier_name:
+				continue
 			if frappe.db.exists("Supplier", {"supplier_name": supplier_name}):
 				self.results["skipped"].append({"doctype": "Supplier", "name": supplier_name, "reason": "duplicate"})
 				continue
