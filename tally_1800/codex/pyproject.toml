@@ -1,0 +1,13 @@
+[project]
+name = "tallydatacrack-codex"
+version = "0.1.0"
+description = "Read-only reverse-engineering toolkit for Tally/TallyPrime .1800 data files"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+tally1800 = "tally1800.cli:main"
+
+[tool.ruff]
+line-length = 100
+

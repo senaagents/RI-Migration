@@ -1,0 +1,128 @@
+;; CODX1800Bridge.tdl
+;;
+;; Experimental helper TDL for the tallydatacrack-codex / tally-db-pipeline
+;; hybrid workflow.
+;;
+;; Scope for v0:
+;; - read-only probes
+;; - small object/collection exports for exact MASTERID/name targets
+;; - no production writes
+;;
+;; Load only in lab Tally until the reports are validated. Production fallback
+;; should continue to use the existing minimal XML object exports unless a
+;; customer explicitly permits loading this helper.
+
+[System: Variables]
+    CODXTargetMasterID    : ""
+    CODXTargetGUID        : ""
+    CODXTargetName        : ""
+    CODXTargetObjectType  : ""
+
+[Variable: CODXTargetMasterID]
+    Type    : String
+    Default : ""
+
+[Variable: CODXTargetGUID]
+    Type    : String
+    Default : ""
+
+[Variable: CODXTargetName]
+    Type    : String
+    Default : ""
+
+[Variable: CODXTargetObjectType]
+    Type    : String
+    Default : ""
+
+;; -------------------------------------------------------------------------
+;; Health / loaded-company probe
+;; -------------------------------------------------------------------------
+
+[Report: CODX1800Health]
+    Form : CODX1800Health
+
+[Form: CODX1800Health]
+    Part : CODX1800Health
+
+[Part: CODX1800Health]
+    Line : CODX1800HealthCompany, CODX1800HealthDate
+
+[Line: CODX1800HealthCompany]
+    Field : Medium Prompt, CODX1800HealthCompany
+    Local : Field : Medium Prompt : Set as : "Company"
+
+[Field: CODX1800HealthCompany]
+    Use    : Name Field
+    Set as : ##SVCurrentCompany
+
+[Line: CODX1800HealthDate]
+    Field : Medium Prompt, CODX1800HealthDate
+    Local : Field : Medium Prompt : Set as : "Current Date"
+
+[Field: CODX1800HealthDate]
+    Use    : Name Field
+    Set as : $$String:##SVCurrentDate
+
+;; -------------------------------------------------------------------------
+;; Voucher probes
+;; -------------------------------------------------------------------------
+
+[Collection: CODX1800VoucherByMasterID]
+    Type   : Voucher
+    Filter : CODX1800VoucherMasterIDFilter
+    Fetch  : MasterID, GUID, Date, VoucherNumber, VoucherTypeName, PartyLedgerName, Narration
+    Fetch  : RemoteID, VoucherKey, AlterID, IsCancelled, IsOptional
+    Fetch  : AllLedgerEntries.*, LedgerEntries.*, AllInventoryEntries.*, InventoryEntries.*
+    Fetch  : BillAllocations.*, BankAllocations.*, BatchAllocations.*, AccountingAllocations.*
+
+[System: Formulae]
+    CODX1800VoucherMasterIDFilter : $$String:$MasterID = ##CODXTargetMasterID
+
+[Collection: CODX1800VoucherByGUID]
+    Type   : Voucher
+    Filter : CODX1800VoucherGUIDFilter
+    Fetch  : MasterID, GUID, Date, VoucherNumber, VoucherTypeName, PartyLedgerName, Narration
+    Fetch  : RemoteID, VoucherKey, AlterID, IsCancelled, IsOptional
+    Fetch  : AllLedgerEntries.*, LedgerEntries.*, AllInventoryEntries.*, InventoryEntries.*
+    Fetch  : BillAllocations.*, BankAllocations.*, BatchAllocations.*, AccountingAllocations.*
+
+[System: Formulae]
+    CODX1800VoucherGUIDFilter : $GUID = ##CODXTargetGUID OR $RemoteID = ##CODXTargetGUID OR $SenderID = ##CODXTargetGUID
+
+;; -------------------------------------------------------------------------
+;; Master probes
+;; -------------------------------------------------------------------------
+
+[Collection: CODX1800LedgerByName]
+    Type   : Ledger
+    Filter : CODX1800NameFilter
+    Fetch  : MasterID, GUID, Name, Parent, MailingName, Address, StateName, CountryName
+    Fetch  : PINCode, Email, Phone, IncomeTaxNumber, GSTRegistrationType, GSTIN, OpeningBalance, ClosingBalance
+
+[Collection: CODX1800StockItemByName]
+    Type   : Stock Item
+    Filter : CODX1800NameFilter
+    Fetch  : MasterID, GUID, Name, Parent, BaseUnits, OpeningBalance, ClosingBalance
+    Fetch  : OpeningRate, OpeningValue, ClosingRate, ClosingValue, GSTApplicable, GSTTypeOfSupply, GSTHSNCode
+
+[Collection: CODX1800VoucherTypeByName]
+    Type   : Voucher Type
+    Filter : CODX1800NameFilter
+    Fetch  : MasterID, GUID, Name, Parent, NumberingMethod
+
+[System: Formulae]
+    CODX1800NameFilter : $Name = ##CODXTargetName
+
+;; -------------------------------------------------------------------------
+;; Notes
+;; -------------------------------------------------------------------------
+;;
+;; This TDL intentionally avoids mutation functions. The immediate production
+;; integration should use:
+;;   1. direct .1800 decode
+;;   2. xml_repair_queue
+;;   3. narrow object exports by MASTERID through tally-db-pipeline
+;;   4. parser-learning handoffs from the repaired rows
+;;
+;; Once this read-only helper is validated in Test Synthetic, mutation helpers
+;; can be added as separate reports/functions with before/after snapshot guards.

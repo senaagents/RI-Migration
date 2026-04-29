@@ -5,7 +5,7 @@
       <StepIndicator :steps="stepLabels" :currentStep="step" @go="goToStep" />
     </Teleport>
 
-    <div class="max-w-3xl mx-auto px-8 py-10">
+    <div :class="[step === 2 ? 'max-w-7xl' : 'max-w-3xl', 'mx-auto px-8 py-10']">
 
     <!-- Step 1: Source -->
     <div v-if="step === 0">
@@ -43,7 +43,7 @@
 
       <!-- Tally input methods -->
       <div v-if="source === 'tally'" class="space-y-3">
-        <p class="text-xs text-gray-400 dark:text-gray-500 mb-1">Use the bridge for a fresh source snapshot. It keeps a preview-ready copy normalized without exposing your Tally port. Uploads remain available as fallback.</p>
+        <p class="text-xs text-gray-400 dark:text-gray-500 mb-1">Use the bridge first. Direct Tally is available when this backend can reach the Tally machine. XML upload stays as the offline fallback.</p>
 
         <!-- Method 1: Sena Bridge (Recommended) -->
         <div
@@ -65,94 +65,63 @@
           </button>
 
           <div v-if="tallyMode === 'bridge'" class="px-5 pb-5 space-y-4">
-            <div class="bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900 rounded-lg p-4">
-              <ol class="space-y-2 text-xs text-gray-600 dark:text-gray-300">
-                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">1</span><span>Download the bridge package on the Windows machine where Tally runs, unzip it, then run <code class="font-mono text-[10px]">install_bridge_windows.ps1</code>.</span></li>
-                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">2</span><span>Open Tally with your company loaded. The bridge checks <code class="font-mono text-[10px]">localhost:9000</code>.</span></li>
-                <li class="flex gap-2"><span class="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center text-[10px] font-bold">3</span><span>Create a pairing code here and enter it in the bridge.</span></li>
-              </ol>
-              <div class="flex flex-wrap gap-2 mt-4">
-                <a
-                  href="http://192.168.1.10:8001/assets/agentapp_migration/bridge/sena_tally_bridge.zip"
-                  download
-                  class="px-3 py-1.5 bg-white dark:bg-gray-900 border border-blue-100 dark:border-blue-900 rounded-lg text-xs font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950 transition-colors"
-                >Download bridge package</a>
+            <div class="bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900 rounded-lg p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p class="text-sm font-semibold text-ink-primary">1. Download on the Tally Windows computer</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Unzip it, keep Tally open, and leave the company loaded.</p>
               </div>
+              <a
+                href="/bridge/sena_tally_bridge.zip"
+                download
+                class="inline-flex justify-center px-4 py-2 bg-white dark:bg-gray-900 border border-blue-100 dark:border-blue-900 rounded-lg text-sm font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950 transition-colors"
+              >Download bridge ZIP</a>
             </div>
 
-            <div class="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-              <div class="px-4 py-3 flex items-center gap-3 bg-gray-50 dark:bg-gray-950">
-                <div class="flex-1 min-w-0">
-                  <p class="font-semibold text-sm text-ink-primary">Existing source connections</p>
-                  <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Resume a discovered source after refreshing this page.</p>
-                </div>
-                <button
-                  @click="loadTallyConnections"
-                  :disabled="loadingTallyConnections"
-                  class="px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-200 hover:border-primary-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >{{ loadingTallyConnections ? 'Loading...' : 'Reload' }}</button>
+            <div class="rounded-lg border border-gray-200 dark:border-gray-800 p-4 space-y-3">
+              <div>
+                <p class="text-sm font-semibold text-ink-primary">2. Create pairing code</p>
+                <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">This creates a pending bridge pairing. It is not connected until the Windows bridge claims it.</p>
               </div>
-              <div v-if="tallyConnectionsError" class="px-4 py-3 text-xs text-red-500 border-t border-gray-200 dark:border-gray-800">{{ tallyConnectionsError }}</div>
-              <div v-else-if="tallyConnectionsNotice" class="px-4 py-3 text-xs text-green-600 dark:text-green-400 border-t border-gray-200 dark:border-gray-800">{{ tallyConnectionsNotice }}</div>
-              <div v-else-if="loadingTallyConnections" class="px-4 py-4 text-xs text-gray-400 dark:text-gray-500 border-t border-gray-200 dark:border-gray-800">
-                Loading saved source connections...
-              </div>
-              <div v-else-if="!tallyConnections.length" class="px-4 py-4 text-xs text-gray-400 dark:text-gray-500 border-t border-gray-200 dark:border-gray-800">
-                No source connections found yet. Create a pairing code and run the Windows bridge once.
-              </div>
-              <div v-else class="divide-y divide-gray-100 dark:divide-gray-800">
-                <div
-                  v-for="connection in tallyConnections"
-                  :key="connection.name"
-                  :class="['px-4 py-3 flex items-center gap-3', selectedBridgeConnectionId === connection.name ? 'bg-primary-50 dark:bg-primary-950/30' : 'bg-white dark:bg-gray-900']"
-                >
-                  <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2">
-                      <p class="text-sm font-medium text-ink-primary truncate">{{ connection.tally_company_name || connection.connection_label || connection.name }}</p>
-                      <span :class="['text-[10px] font-bold px-2 py-0.5 rounded-full', connection.status === 'Active' ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400']">{{ connection.status }}</span>
-                    </div>
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                      {{ connection.name }}<span v-if="connection.last_sync_at"> · synced {{ formatDateTime(connection.last_sync_at) }}</span><span v-else-if="connection.last_seen_at"> · seen {{ formatDateTime(connection.last_seen_at) }}</span>
-                    </p>
-                    <p v-if="connection.last_error" class="text-xs text-red-500 mt-1 line-clamp-2">{{ summarizeConnectionError(connection.last_error) }}</p>
-                  </div>
-                  <div class="flex flex-wrap gap-2">
-                    <button
-                      @click="resumeTallyConnection(connection)"
-                      :disabled="loadingBridgeDiscovery && selectedBridgeConnectionId === connection.name"
-                      class="px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-200 hover:border-primary-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >{{ selectedBridgeConnectionId === connection.name ? 'Selected' : 'Resume' }}</button>
-                    <button
-                      @click="deleteTallyConnection(connection)"
-                      :disabled="deletingConnectionId === connection.name"
-                      class="px-3 py-1.5 bg-white dark:bg-gray-900 border border-red-200 dark:border-red-900 rounded-lg text-xs font-medium text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >{{ deletingConnectionId === connection.name ? 'Deleting...' : 'Delete' }}</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="flex flex-wrap items-center gap-3">
               <button
                 @click="createBridgePairing"
                 :disabled="creatingPairing"
-                class="px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg text-sm font-medium hover:bg-gray-700 dark:hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                class="w-full sm:w-auto px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg text-sm font-medium hover:bg-gray-700 dark:hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {{ creatingPairing ? 'Creating...' : 'Create New Pairing Code' }}
               </button>
-              <div v-if="bridgePairing?.pairing_code" class="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-2 bg-gray-50 dark:bg-gray-800">
+              <button
+                v-if="bridgePairing?.pairing_code"
+                @click="copyToClipboard(bridgePairing.pairing_code, 'pairing')"
+                class="w-full rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3 bg-gray-50 dark:bg-gray-800 text-left hover:border-primary-300 transition-colors"
+              >
                 <span class="text-xs text-gray-400 mr-2">Pairing code</span>
                 <span class="font-mono font-bold tracking-wider">{{ bridgePairing.pairing_code }}</span>
-              </div>
+                <span class="ml-3 text-xs font-medium text-primary-500">{{ copiedTarget === 'pairing' ? 'Copied' : 'Click to copy' }}</span>
+              </button>
+              <p v-if="bridgePairing?.pairing_code" class="text-xs text-gray-400 dark:text-gray-500">Connection record: {{ bridgePairing.connection_id }}.</p>
+              <p v-else-if="bridgePairing" class="text-xs text-gray-400 dark:text-gray-500">Connection record: {{ bridgePairing.connection_id }}. This saved source can move forward or be refreshed after the bridge syncs again.</p>
+              <p v-if="bridgeError" class="text-xs text-red-500">{{ bridgeError }}</p>
             </div>
-            <p v-if="bridgePairing?.pairing_code" class="text-xs text-gray-400 dark:text-gray-500">Connection record: {{ bridgePairing.connection_id }}. The bridge will claim this code, snapshot source data, and start normalization for preview.</p>
-            <p v-else-if="bridgePairing" class="text-xs text-gray-400 dark:text-gray-500">Connection record: {{ bridgePairing.connection_id }}. This saved source can move forward or be refreshed after the bridge syncs again.</p>
-            <p v-if="bridgeError" class="text-xs text-red-500">{{ bridgeError }}</p>
+
+            <div v-if="bridgePairing?.pairing_code" class="rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950 p-4 space-y-3">
+              <div>
+                <p class="text-sm font-semibold text-ink-primary">3. Run this in Windows PowerShell</p>
+                <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Use the unzipped bridge folder on the Tally computer.</p>
+              </div>
+              <div class="relative">
+                <button
+                  @click="copyToClipboard(bridgePowerShellCommand, 'bridge-command')"
+                  class="absolute right-2 top-2 px-2 py-1 rounded bg-white/10 text-gray-100 text-[10px] font-medium hover:bg-white/20"
+                >{{ copiedTarget === 'bridge-command' ? 'Copied' : 'Copy command' }}</button>
+                <pre class="overflow-x-auto rounded-lg bg-gray-900 text-gray-100 p-3 pr-28 text-[11px] leading-relaxed"><code>{{ bridgePowerShellCommand }}</code></pre>
+              </div>
+              <p class="text-xs text-gray-400 dark:text-gray-500">After it finishes, click Refresh discovery here. If Tally is running on another Windows host, replace <code class="font-mono text-[10px]">localhost</code> with that machine's Tally IP.</p>
+            </div>
 
             <div v-if="bridgePairing" class="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
               <div class="px-4 py-3 flex items-center gap-3 bg-gray-50 dark:bg-gray-950">
                 <div class="flex-1 min-w-0">
-                  <p class="font-semibold text-sm text-ink-primary">Source snapshot plan</p>
+                  <p class="font-semibold text-sm text-ink-primary">4. Refresh discovery</p>
                   <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{{ bridgeDiscoverySubtitle }}</p>
                 </div>
                 <button
@@ -160,6 +129,9 @@
                   :disabled="loadingBridgeDiscovery"
                   class="px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-200 hover:border-primary-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >{{ loadingBridgeDiscovery ? 'Refreshing...' : 'Refresh discovery' }}</button>
+              </div>
+              <div v-if="bridgeAutoRefreshActive" class="px-4 py-2 text-xs text-blue-600 dark:text-blue-300 border-t border-gray-200 dark:border-gray-800 bg-blue-50 dark:bg-blue-950/30">
+                Waiting for the Windows bridge. Checking automatically every 5 seconds.
               </div>
               <div v-if="bridgeDiscoveryError" class="px-4 py-3 text-xs text-red-500 border-t border-gray-200 dark:border-gray-800">{{ bridgeDiscoveryError }}</div>
               <div v-else-if="!tallyDiscoveryItems.length" class="px-4 py-4 text-xs text-gray-400 dark:text-gray-500 border-t border-gray-200 dark:border-gray-800">
@@ -184,6 +156,58 @@
                 </label>
               </div>
             </div>
+
+            <details class="rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+              <summary class="px-4 py-3 cursor-pointer list-none bg-gray-50 dark:bg-gray-950">
+                <div class="flex items-center gap-3">
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-semibold text-ink-primary">Use an existing bridge</p>
+                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">For a bridge that was already paired on this site.</p>
+                  </div>
+                  <span class="text-xs text-gray-400 dark:text-gray-500">Optional</span>
+                </div>
+              </summary>
+              <div class="border-t border-gray-200 dark:border-gray-800">
+                <div class="px-4 py-3 flex items-center justify-between gap-3">
+                  <p class="text-xs text-gray-400 dark:text-gray-500">Choose an active or previously paired source.</p>
+                  <button
+                    @click="loadTallyConnections"
+                    :disabled="loadingTallyConnections"
+                    class="px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-200 hover:border-primary-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >{{ loadingTallyConnections ? 'Loading...' : 'Reload' }}</button>
+                </div>
+                <div v-if="tallyConnectionsError" class="px-4 py-3 text-xs text-red-500 border-t border-gray-200 dark:border-gray-800">{{ tallyConnectionsError }}</div>
+                <div v-else-if="tallyConnectionsNotice" class="px-4 py-3 text-xs text-green-600 dark:text-green-400 border-t border-gray-200 dark:border-gray-800">{{ tallyConnectionsNotice }}</div>
+                <div v-else-if="loadingTallyConnections" class="px-4 py-4 text-xs text-gray-400 dark:text-gray-500 border-t border-gray-200 dark:border-gray-800">
+                  Loading saved bridges...
+                </div>
+                <div v-else-if="!tallyConnections.length" class="px-4 py-4 text-xs text-gray-400 dark:text-gray-500 border-t border-gray-200 dark:border-gray-800">
+                  No existing bridges found.
+                </div>
+                <div v-else class="divide-y divide-gray-100 dark:divide-gray-800">
+                  <div
+                    v-for="connection in tallyConnections"
+                    :key="connection.name"
+                    :class="['px-4 py-3 flex items-center gap-3', selectedBridgeConnectionId === connection.name ? 'bg-primary-50 dark:bg-primary-950/30' : 'bg-white dark:bg-gray-900']"
+                  >
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center gap-2">
+                        <p class="text-sm font-medium text-ink-primary truncate">{{ connection.tally_company_name || connection.connection_label || connection.name }}</p>
+                        <span :class="['text-[10px] font-bold px-2 py-0.5 rounded-full', connection.status === 'Active' ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400']">{{ connection.status }}</span>
+                      </div>
+                      <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                        {{ connection.name }}<span v-if="connection.last_sync_at"> · synced {{ formatDateTime(connection.last_sync_at) }}</span><span v-else-if="connection.last_seen_at"> · seen {{ formatDateTime(connection.last_seen_at) }}</span>
+                      </p>
+                    </div>
+                    <button
+                      @click="resumeTallyConnection(connection)"
+                      :disabled="loadingBridgeDiscovery && selectedBridgeConnectionId === connection.name"
+                      class="px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-200 hover:border-primary-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >{{ selectedBridgeConnectionId === connection.name ? 'Using' : 'Use' }}</button>
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
         </div>
 
@@ -202,7 +226,7 @@
                 <span class="font-semibold text-sm">Upload Tally Export</span>
                 <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">Fallback</span>
               </div>
-              <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Export your data from TallyPrime as XML files and upload them here. No setup required.</p>
+              <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Export your data from TallyPrime as XML files. Upload processing is the offline fallback path we will wire next.</p>
             </div>
           </button>
 
@@ -263,10 +287,13 @@
                 <p class="text-[11px] text-gray-400 dark:text-gray-500 mt-1.5 ml-1">Vouchers file is optional -- you can migrate master data first and add transactions later.</p>
               </div>
             </div>
+            <div class="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 p-3">
+              <p class="text-xs text-amber-700 dark:text-amber-300">XML upload is visible as the offline fallback, but import from uploaded files is not enabled yet. Use the bridge or direct Tally connection for this run.</p>
+            </div>
           </div>
         </div>
 
-        <!-- Method 3: Live Server -->
+        <!-- Method 3: Direct Tally Connection -->
         <div
           :class="['rounded-xl border-2 transition-all overflow-hidden', tallyMode === 'live' ? 'border-primary-500 bg-white dark:bg-gray-900' : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900']"
         >
@@ -277,8 +304,11 @@
               </div>
             </div>
             <div class="flex-1 min-w-0">
-              <span class="font-semibold text-sm">Live Server Connection</span>
-              <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Connect directly to TallyPrime running on your computer or network. It keeps a read-only snapshot ready for preview.</p>
+              <div class="flex items-center gap-2">
+                <span class="font-semibold text-sm">Direct Tally Connection</span>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">Admin fallback</span>
+              </div>
+              <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Connect directly to TallyPrime over the local network when this backend can reach the Tally HTTP port.</p>
             </div>
           </button>
 
@@ -354,6 +384,7 @@
 
         <!-- Method 4: Upload Excel -->
         <div
+          v-if="false"
           :class="['rounded-xl border-2 transition-all overflow-hidden', tallyMode === 'excel' ? 'border-primary-500 bg-white dark:bg-gray-900' : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900']"
         >
           <button @click="selectTallyMode('excel')" class="w-full text-left px-5 py-4 flex items-start gap-3">
@@ -626,54 +657,184 @@
           @click="fetchPreview"
           :disabled="!canProceedFromTarget"
           class="px-6 py-2.5 bg-primary-500 hover:bg-primary-600 text-white rounded-lg text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >{{ fetchingPreview ? 'Fetching Data...' : 'Continue to Preview' }}</button>
+        >{{ fetchingPreview ? 'Loading Mapping...' : 'Continue to Mapping' }}</button>
       </div>
     </div>
 
-    <!-- Step 3: Source Preview -->
+    <!-- Step 3: Mapping -->
     <div v-if="step === 2">
-      <h2 class="text-xl font-bold mb-1">Source Preview</h2>
-      <p class="text-gray-500 dark:text-gray-400 text-sm mb-6">Review the snapped and normalized source records. Uncheck items you want to skip.</p>
+      <h2 class="text-xl font-bold mb-1">Mapping</h2>
+      <p class="text-gray-500 dark:text-gray-400 text-sm mb-6">
+        Match the source output contract to the target input contract. The middle column is the first deterministic mapping plan; AI suggestions can sit here after this contract shape is stable.
+      </p>
 
-      <div class="space-y-3">
-        <div
-          v-for="entity in previewEntities"
-          :key="entity.key"
-          class="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden"
-        >
-          <div class="flex items-center gap-3 px-5 py-3.5">
-            <input
-              type="checkbox"
-              v-model="entity.enabled"
-              class="w-4 h-4 rounded border-gray-300 text-primary-500 focus:ring-primary-500"
-            />
-            <div class="flex-1">
-              <span class="font-medium text-sm">{{ entity.label }}</span>
-            </div>
-            <span class="text-sm font-mono text-gray-400">{{ entity.count.toLocaleString() }}</span>
-            <button
-              @click="entity.expanded = !entity.expanded"
-              class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+      <div class="grid grid-cols-1 xl:grid-cols-[1fr_1.15fr_1fr] gap-4">
+        <section class="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+          <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+            <p class="text-sm font-semibold text-ink-primary">Source Output</p>
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{{ previewEntities.length }} record groups from {{ sourceLabel }}</p>
+          </div>
+          <div class="divide-y divide-gray-100 dark:divide-gray-800 max-h-[620px] overflow-y-auto">
+            <div
+              v-for="entity in previewEntities"
+              :key="entity.key"
+              class="px-4 py-3"
             >
-              <svg
-                :class="['w-4 h-4 text-gray-400 transition-transform', entity.expanded ? 'rotate-180' : '']"
-                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-              ><polyline points="6 9 12 15 18 9"/></svg>
-            </button>
+              <div class="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  v-model="entity.enabled"
+                  class="mt-1 w-4 h-4 rounded border-gray-300 text-primary-500 focus:ring-primary-500"
+                />
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <p class="font-medium text-sm text-ink-primary truncate">{{ entity.label }}</p>
+                      <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                        {{ formatNumber(entity.count) }} records · {{ sourceFieldCount(entity) }} fields
+                      </p>
+                    </div>
+                    <button
+                      @click="entity.expanded = !entity.expanded"
+                      class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    >
+                      <svg
+                        :class="['w-4 h-4 text-gray-400 transition-transform', entity.expanded ? 'rotate-180' : '']"
+                        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                      ><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                  </div>
+                  <div v-if="entity.fields?.length" class="flex flex-wrap gap-1.5 mt-3">
+                    <span
+                      v-for="(field, fi) in entity.fields.slice(0, 8)"
+                      :key="`${sourceFieldName(field)}-${fi}`"
+                      class="px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-800 text-[11px] text-gray-600 dark:text-gray-300"
+                    >{{ sourceFieldName(field) }}</span>
+                    <span v-if="entity.fields.length > 8" class="px-2 py-1 rounded-md bg-gray-50 dark:bg-gray-950 text-[11px] text-gray-400">
+                      +{{ entity.fields.length - 8 }}
+                    </span>
+                  </div>
+                  <div v-if="entity.expanded && entity.samples?.length" class="mt-3 rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-950 overflow-hidden">
+                    <div
+                      v-for="(sample, si) in entity.samples.slice(0, 4)"
+                      :key="si"
+                      class="grid grid-cols-[auto_1fr] gap-x-3 px-3 py-2 text-xs border-b border-gray-100 dark:border-gray-800 last:border-0"
+                    >
+                      <span class="text-gray-400 font-mono">{{ si + 1 }}</span>
+                      <span class="min-w-0">
+                        <span class="block font-medium text-ink-primary truncate">{{ sample.name || sample.record_name || sample.source_id || sample }}</span>
+                        <span class="block text-gray-400 truncate">{{ sample.detail || sample.parent || sample.source_id || '' }}</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div v-if="entity.expanded && entity.samples.length" class="border-t border-gray-100 dark:border-gray-800 px-5 py-3 bg-gray-50 dark:bg-gray-950">
-            <table class="w-full text-xs">
-              <tbody>
-                <tr v-for="(sample, si) in entity.samples" :key="si" class="border-b border-gray-100 dark:border-gray-800 last:border-0">
-                  <td class="py-1.5 pr-4 text-gray-400 font-mono">{{ si + 1 }}</td>
-                  <td class="py-1.5 font-medium">{{ sample.name || sample.record_name || sample.source_id || sample }}</td>
-                  <td class="py-1.5 text-gray-400">{{ sample.detail || sample.parent || sample.source_id || '' }}</td>
-                  <td v-if="sample.balance != null" class="py-1.5 text-right font-mono">{{ formatNumber(sample.balance) }}</td>
-                </tr>
-              </tbody>
-            </table>
+        </section>
+
+        <section class="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+          <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+            <p class="text-sm font-semibold text-ink-primary">Mapping Plan</p>
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Baseline suggestions. Review before any write/import runs.</p>
           </div>
-        </div>
+          <div class="divide-y divide-gray-100 dark:divide-gray-800 max-h-[620px] overflow-y-auto">
+            <div
+              v-for="row in mappingRows"
+              :key="row.source.key"
+              :class="['px-5 py-4', row.source.enabled ? 'bg-white dark:bg-gray-900' : 'bg-gray-50 dark:bg-gray-950 opacity-60']"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="text-sm font-semibold text-ink-primary truncate">{{ row.source.label }}</p>
+                  <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{{ formatNumber(row.source.count) }} source rows</p>
+                </div>
+                <span :class="['text-[10px] font-bold px-2 py-1 rounded-md', row.confidence === 'High' ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300' : row.target ? 'bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400']">
+                  {{ row.confidence }}
+                </span>
+              </div>
+              <div class="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+                <div class="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2">
+                  <p class="text-[11px] uppercase tracking-wide text-gray-400">From</p>
+                  <p class="text-sm font-medium text-ink-primary truncate">{{ row.source.label }}</p>
+                  <p class="text-[11px] text-gray-400 truncate">{{ row.source.objectType || row.source.key }}</p>
+                </div>
+                <svg class="w-4 h-4 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+                <div class="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2">
+                  <p class="text-[11px] uppercase tracking-wide text-gray-400">To</p>
+                  <p class="text-sm font-medium text-ink-primary truncate">{{ row.target?.doctype || 'Needs target' }}</p>
+                  <p class="text-[11px] text-gray-400 truncate">{{ row.target ? 'Sena ERP DocType' : 'No target selected' }}</p>
+                </div>
+              </div>
+              <div v-if="row.target" class="mt-3 flex items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
+                <span>Target requires {{ row.requiredFields.length }} fields. Writable fields available: {{ row.target.writable_field_count }}.</span>
+                <button
+                  @click="toggleMappingDetails(row.source.key)"
+                  class="px-2.5 py-1 rounded-md border border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-300 hover:border-primary-300 transition-colors"
+                >{{ mappingDetailsOpen(row.source.key) ? 'Hide details' : 'View details' }}</button>
+              </div>
+              <div v-else class="mt-3 text-xs text-amber-600 dark:text-amber-300">
+                No deterministic target selected yet. This group should be handled by manual mapping or AI-assisted transform rules.
+              </div>
+              <div v-if="row.target && mappingDetailsOpen(row.source.key)" class="mt-3 rounded-lg border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-950 overflow-hidden">
+                <div class="px-3 py-2 border-b border-gray-100 dark:border-gray-800">
+                  <p class="text-xs font-semibold text-ink-primary">Field movement</p>
+                  <p class="text-[11px] text-gray-400">These are name-based suggestions only. They need approval before import.</p>
+                </div>
+                <div class="divide-y divide-gray-100 dark:divide-gray-800">
+                  <div
+                    v-for="fieldRow in mappingFieldRows(row).slice(0, 8)"
+                    :key="`${row.source.key}-${fieldRow.sourceField}-${fieldRow.targetField || 'missing'}`"
+                    class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-3 py-2 text-xs"
+                  >
+                    <span class="font-medium text-ink-primary truncate">{{ fieldRow.sourceField }}</span>
+                    <svg class="w-3.5 h-3.5 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+                    <span :class="['truncate', fieldRow.targetField ? 'text-ink-primary' : 'text-amber-600 dark:text-amber-300']">{{ fieldRow.targetField || 'Needs target field' }}</span>
+                  </div>
+                </div>
+                <div v-if="missingRequiredTargetFields(row).length" class="px-3 py-2 border-t border-amber-100 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30">
+                  <p class="text-[11px] font-semibold text-amber-700 dark:text-amber-300">Required target fields still need a source, default, or transform:</p>
+                  <p class="text-[11px] text-amber-700 dark:text-amber-300 mt-1">{{ missingRequiredTargetFields(row).map(field => field.label || field.fieldname).join(', ') }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+          <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+            <p class="text-sm font-semibold text-ink-primary">Target Input</p>
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+              {{ selectedTargetSchema?.schema?.doctype_count || 0 }} DocTypes · {{ selectedTargetSchema?.schema?.writable_field_count || 0 }} writable fields
+            </p>
+          </div>
+          <div class="divide-y divide-gray-100 dark:divide-gray-800 max-h-[620px] overflow-y-auto">
+            <div
+              v-for="doctypeSchema in targetDoctypeSchemas"
+              :key="doctypeSchema.doctype"
+              class="px-4 py-3"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="text-sm font-medium text-ink-primary truncate">{{ doctypeSchema.doctype }}</p>
+                  <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                    {{ doctypeSchema.field_count }} fields · {{ doctypeSchema.writable_field_count }} writable · {{ requiredTargetFields(doctypeSchema).length }} required
+                  </p>
+                </div>
+              </div>
+              <div class="flex flex-wrap gap-1.5 mt-3">
+                <span
+                  v-for="field in writableTargetFields(doctypeSchema).slice(0, 7)"
+                  :key="field.fieldname || field.label"
+                  :class="['px-2 py-1 rounded-md text-[11px]', field.reqd ? 'bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-300' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300']"
+                >{{ field.label || field.fieldname }}</span>
+                <span v-if="writableTargetFields(doctypeSchema).length > 7" class="px-2 py-1 rounded-md bg-gray-50 dark:bg-gray-950 text-[11px] text-gray-400">
+                  +{{ writableTargetFields(doctypeSchema).length - 7 }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
 
       <div class="flex justify-between mt-8">
@@ -681,7 +842,7 @@
         <button
           @click="startMigration"
           class="px-6 py-2.5 bg-primary-500 hover:bg-primary-600 text-white rounded-lg text-sm font-medium transition-colors"
-        >Continue to Migrate</button>
+        >Continue to Migration Plan</button>
       </div>
     </div>
 
@@ -776,7 +937,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import StepIndicator from '@/components/StepIndicator.vue'
 import SourceCard from '@/components/SourceCard.vue'
 import FileUploadRow from '@/components/FileUploadRow.vue'
@@ -799,12 +960,15 @@ import {
   getIntegrationSourceSchema,
 } from '@/services/api.js'
 
-const stepLabels = ['Source', 'Target', 'Source Preview', 'Migrate', 'Validate']
+const stepLabels = ['Source', 'Target', 'Mapping', 'Migrate', 'Validate']
 const step = ref(0)
 const headerMounted = ref(false)
+const WIZARD_STATE_KEY = 'agentapp_migration.newMigrationWizard.v1'
+let restoringWizardState = false
 onMounted(async () => {
   headerMounted.value = !!document.querySelector('header .flex-1')
   await Promise.all([loadSourceTypes(), loadTargetTypes()])
+  await restoreWizardState()
 })
 
 // Step 1: Source
@@ -815,11 +979,14 @@ const sourceTypesError = ref('')
 const tallyMode = ref('bridge')
 const selectedSourceType = computed(() => sourceTypes.value.find(item => item.source_key === source.value) || null)
 const sourceTitle = computed(() => selectedSourceType.value?.title || 'the source')
+const sourceLabel = computed(() => sourceTitle.value)
 
 // Bridge mode
 const bridgePairing = ref(null)
 const creatingPairing = ref(false)
 const bridgeError = ref('')
+const bridgeServerUrl = import.meta.env.VITE_BRIDGE_SERVER_URL || import.meta.env.VITE_FRAPPE_BASE_URL || window.location.origin
+const copiedTarget = ref('')
 const tallyConnections = ref([])
 const loadingTallyConnections = ref(false)
 const tallyConnectionsError = ref('')
@@ -828,8 +995,14 @@ const deletingConnectionId = ref('')
 const bridgeDiscovery = ref(null)
 const loadingBridgeDiscovery = ref(false)
 const bridgeDiscoveryError = ref('')
+const bridgeAutoRefreshActive = ref(false)
 const tallyDiscoveryItems = ref([])
+let bridgeAutoRefreshInterval = null
 const selectedBridgeConnectionId = computed(() => bridgePairing.value?.connection_id || '')
+const bridgePowerShellCommand = computed(() => {
+  const pairingCode = bridgePairing.value?.pairing_code || '<PAIRING_CODE>'
+  return `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass\n.\\install_bridge_windows.ps1 -Server "${bridgeServerUrl}" -PairingCode "${pairingCode}" -TallyHost "localhost" -TallyPort 9000 -RunOnce`
+})
 const selectedTallyDiscoveryItems = computed(() => tallyDiscoveryItems.value.filter(item => item.enabled))
 const bridgeDiscoverySubtitle = computed(() => {
   const connection = bridgeDiscovery.value?.connection
@@ -910,9 +1083,9 @@ const canProceedFromSource = computed(() => {
   if (source.value === 'excel') return !!excelWorkbook.value
   if (source.value !== 'tally') return false
   if (tallyMode.value === 'bridge') return !!bridgePairing.value && selectedTallyDiscoveryItems.value.length > 0
-  if (tallyMode.value === 'xml') return !!mastersFile.value
+  if (tallyMode.value === 'xml') return false
   if (tallyMode.value === 'live') return connectionStatus.value === 'ok'
-  if (tallyMode.value === 'excel') return !!excelCoA.value
+  if (tallyMode.value === 'excel') return false
   return false
 })
 
@@ -1013,16 +1186,36 @@ async function createBridgePairing() {
   creatingPairing.value = true
   bridgeError.value = ''
   try {
-    bridgePairing.value = await createIntegrationTallyPairing('Tally source connection')
+    bridgePairing.value = await createIntegrationTallyPairing('Pending Tally bridge pairing')
     bridgeDiscovery.value = null
     bridgeDiscoveryError.value = ''
     tallyDiscoveryItems.value = []
-    await loadTallyConnections()
+    startBridgeAutoRefresh()
   } catch (e) {
     bridgeError.value = e.message || 'Could not create pairing code'
   } finally {
     creatingPairing.value = false
   }
+}
+
+async function copyToClipboard(text, target) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textarea)
+  }
+  copiedTarget.value = target
+  window.setTimeout(() => {
+    if (copiedTarget.value === target) copiedTarget.value = ''
+  }, 1500)
 }
 
 async function loadTallyConnections() {
@@ -1062,6 +1255,7 @@ async function deleteTallyConnection(connection) {
 }
 
 function resetBridgeSelection() {
+  stopBridgeAutoRefresh()
   bridgePairing.value = null
   bridgeDiscovery.value = null
   bridgeDiscoveryError.value = ''
@@ -1077,22 +1271,47 @@ async function resumeTallyConnection(connection) {
   bridgeError.value = ''
   bridgeDiscoveryError.value = ''
   tallyDiscoveryItems.value = []
+  stopBridgeAutoRefresh()
   await refreshTallyDiscovery()
 }
 
 async function refreshTallyDiscovery() {
   if (!bridgePairing.value?.connection_id) return
+  if (loadingBridgeDiscovery.value) return
   loadingBridgeDiscovery.value = true
   bridgeDiscoveryError.value = ''
   try {
     const status = await getIntegrationConnectionStatus(bridgePairing.value.connection_id)
     bridgeDiscovery.value = status
     tallyDiscoveryItems.value = buildTallyDiscoveryItems(status)
+    if (tallyDiscoveryItems.value.some(item => item.count > 0)) {
+      stopBridgeAutoRefresh()
+    }
   } catch (e) {
     bridgeDiscoveryError.value = e.message || 'Could not refresh discovery'
+    stopBridgeAutoRefresh()
   } finally {
     loadingBridgeDiscovery.value = false
   }
+}
+
+function startBridgeAutoRefresh() {
+  stopBridgeAutoRefresh()
+  bridgeAutoRefreshActive.value = true
+  let attempts = 0
+  bridgeAutoRefreshInterval = window.setInterval(async () => {
+    attempts += 1
+    await refreshTallyDiscovery()
+    if (attempts >= 60) stopBridgeAutoRefresh()
+  }, 5000)
+}
+
+function stopBridgeAutoRefresh() {
+  if (bridgeAutoRefreshInterval) {
+    window.clearInterval(bridgeAutoRefreshInterval)
+    bridgeAutoRefreshInterval = null
+  }
+  bridgeAutoRefreshActive.value = false
 }
 
 function buildTallyDiscoveryItems(status) {
@@ -1211,9 +1430,151 @@ const fetchingPreview = ref(false)
 const targetSchema = ref(null)
 const loadingTargetSchema = ref(false)
 const targetSchemaError = ref('')
+const expandedMappingKey = ref('')
 const selectedTargetSchema = computed(() => (
   targetSchema.value?.target?.target_key === target.value ? targetSchema.value : null
 ))
+const previewEntities = ref([])
+const targetDoctypeSchemas = computed(() => selectedTargetSchema.value?.schema?.doctypes || [])
+const targetDoctypesByName = computed(() => new Map(
+  targetDoctypeSchemas.value.map(doctypeSchema => [doctypeSchema.doctype, doctypeSchema]),
+))
+
+function sourceFieldName(field) {
+  if (!field) return ''
+  if (typeof field === 'string') return field
+  if (typeof field !== 'object') return String(field)
+  const value = firstReadableFieldValue(field, ['field', 'fieldname', 'field_name', 'label', 'name', 'key', 'path', 'id'])
+  if (value) return value
+  try {
+    return JSON.stringify(field).slice(0, 80)
+  } catch {
+    return 'Unknown field'
+  }
+}
+
+function firstReadableFieldValue(record, keys) {
+  for (const key of keys) {
+    const value = record?.[key]
+    const label = readableFieldValue(value)
+    if (label) return label
+  }
+  return ''
+}
+
+function readableFieldValue(value) {
+  if (value == null || value === '') return ''
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) return readableFieldValue(value[0])
+  if (typeof value === 'object') {
+    return firstReadableFieldValue(value, ['field', 'fieldname', 'field_name', 'label', 'name', 'key', 'path', 'id'])
+  }
+  return ''
+}
+
+function sourceFieldCount(entity) {
+  if (entity?.fields?.length) return entity.fields.length
+  const sample = entity?.samples?.[0]
+  if (sample?.record && typeof sample.record === 'object') {
+    const record = sample.record.record || sample.record
+    return Object.keys(record || {}).length
+  }
+  return 0
+}
+
+function writableTargetFields(doctypeSchema) {
+  return (doctypeSchema?.fields || []).filter(field => field.writable !== false && !field.read_only)
+}
+
+function requiredTargetFields(doctypeSchema) {
+  return writableTargetFields(doctypeSchema).filter(field => field.reqd || field.required)
+}
+
+function findTargetDoctype(...names) {
+  for (const name of names) {
+    const schema = targetDoctypesByName.value.get(name)
+    if (schema) return schema
+  }
+  return null
+}
+
+function suggestTargetForSource(entity) {
+  const key = `${entity?.key || ''} ${entity?.label || ''}`.toLowerCase()
+  if (key.includes('customer')) return { target: findTargetDoctype('Customer'), confidence: 'High' }
+  if (key.includes('supplier') || key.includes('vendor')) return { target: findTargetDoctype('Supplier'), confidence: 'High' }
+  if (key.includes('stock item') || key.includes('item') || key.includes('product')) return { target: findTargetDoctype('Item'), confidence: 'High' }
+  if (key.includes('stock group') || key.includes('item group') || key.includes('category')) return { target: findTargetDoctype('Item Group'), confidence: 'High' }
+  if (key.includes('godown') || key.includes('warehouse')) return { target: findTargetDoctype('Warehouse'), confidence: 'High' }
+  if (key.includes('cost centre') || key.includes('cost center')) return { target: findTargetDoctype('Cost Center'), confidence: 'High' }
+  if (key.includes('ledger') || key.includes('group') || key.includes('account')) return { target: findTargetDoctype('Account'), confidence: key.includes('ledger') ? 'Review' : 'High' }
+  if (key.includes('voucher') || key.includes('journal')) return { target: findTargetDoctype('Journal Entry', 'Sales Invoice', 'Purchase Invoice'), confidence: 'Review' }
+  if (key.includes('address')) return { target: findTargetDoctype('Address'), confidence: 'High' }
+  if (key.includes('contact')) return { target: findTargetDoctype('Contact'), confidence: 'High' }
+  return { target: null, confidence: 'Unmapped' }
+}
+
+const mappingRows = computed(() => previewEntities.value.map(entity => {
+  const suggestion = suggestTargetForSource(entity)
+  return {
+    source: entity,
+    target: suggestion.target,
+    confidence: suggestion.target ? suggestion.confidence : 'Unmapped',
+    requiredFields: requiredTargetFields(suggestion.target),
+  }
+}))
+
+function toggleMappingDetails(sourceKey) {
+  expandedMappingKey.value = expandedMappingKey.value === sourceKey ? '' : sourceKey
+}
+
+function mappingDetailsOpen(sourceKey) {
+  return expandedMappingKey.value === sourceKey
+}
+
+function normalizeFieldMatchKey(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+}
+
+function targetFieldLabel(field) {
+  return field?.label || field?.fieldname || ''
+}
+
+function suggestTargetField(sourceField, targetFields) {
+  const sourceKey = normalizeFieldMatchKey(sourceField)
+  if (!sourceKey) return null
+  const exact = targetFields.find(field => normalizeFieldMatchKey(field.fieldname) === sourceKey || normalizeFieldMatchKey(field.label) === sourceKey)
+  if (exact) return exact
+  return targetFields.find(field => {
+    const fieldName = normalizeFieldMatchKey(field.fieldname)
+    const label = normalizeFieldMatchKey(field.label)
+    return fieldName.includes(sourceKey) || label.includes(sourceKey) || sourceKey.includes(fieldName) || sourceKey.includes(label)
+  }) || null
+}
+
+function mappingFieldRows(row) {
+  if (!row?.target) return []
+  const targetFields = writableTargetFields(row.target)
+  const sourceFields = (row.source.fields || []).map(sourceFieldName).filter(Boolean)
+  return sourceFields.map(sourceField => {
+    const targetField = suggestTargetField(sourceField, targetFields)
+    return {
+      sourceField,
+      targetField: targetFieldLabel(targetField),
+      targetFieldMeta: targetField,
+    }
+  })
+}
+
+function missingRequiredTargetFields(row) {
+  const mappedTargetFields = new Set(mappingFieldRows(row).map(fieldRow => normalizeFieldMatchKey(fieldRow.targetField)).filter(Boolean))
+  return requiredTargetFields(row?.target).filter(field => {
+    const fieldName = normalizeFieldMatchKey(field.fieldname)
+    const label = normalizeFieldMatchKey(field.label)
+    return !mappedTargetFields.has(fieldName) && !mappedTargetFields.has(label)
+  })
+}
 
 async function loadTargetTypes() {
   loadingTargetTypes.value = true
@@ -1273,6 +1634,82 @@ const companyAbbr = computed(() => selectedCompany.value?.abbr || '')
 const canProceedFromTarget = computed(() => {
   return target.value === 'sena_erp' && !!selectedCompany.value
 })
+
+function serializeWizardState() {
+  return {
+    step: Math.min(Number(step.value || 0), 2),
+    source: source.value,
+    tallyMode: tallyMode.value,
+    bridgePairing: bridgePairing.value,
+    bridgeDiscovery: bridgeDiscovery.value,
+    tallyDiscoveryItems: tallyDiscoveryItems.value,
+    target: target.value,
+    selectedCompany: selectedCompany.value,
+    previewEntities: previewEntities.value,
+  }
+}
+
+function saveWizardState() {
+  if (restoringWizardState) return
+  try {
+    localStorage.setItem(WIZARD_STATE_KEY, JSON.stringify(serializeWizardState()))
+  } catch {
+    // Ignore storage failures in private windows.
+  }
+}
+
+async function restoreWizardState() {
+  let saved = null
+  try {
+    saved = JSON.parse(localStorage.getItem(WIZARD_STATE_KEY) || 'null')
+  } catch {
+    saved = null
+  }
+  if (!saved || typeof saved !== 'object') return
+
+  restoringWizardState = true
+  try {
+    source.value = saved.source || ''
+    tallyMode.value = saved.tallyMode || 'bridge'
+    bridgePairing.value = saved.bridgePairing || null
+    bridgeDiscovery.value = saved.bridgeDiscovery || null
+    tallyDiscoveryItems.value = Array.isArray(saved.tallyDiscoveryItems) ? saved.tallyDiscoveryItems : []
+    target.value = saved.target || ''
+    selectedCompany.value = saved.selectedCompany || null
+    previewEntities.value = Array.isArray(saved.previewEntities) ? saved.previewEntities : []
+
+    if (source.value === 'tally' && tallyMode.value === 'bridge') {
+      loadTallyConnections()
+    }
+    if (target.value) {
+      await selectTarget(target.value)
+      if (saved.selectedCompany) {
+        const restoredCompany = companies.value.find(company => company.name === saved.selectedCompany.name)
+        selectedCompany.value = restoredCompany || saved.selectedCompany
+      }
+    }
+    step.value = Math.min(Number(saved.step || 0), previewEntities.value.length ? 2 : 1)
+  } finally {
+    restoringWizardState = false
+    saveWizardState()
+  }
+}
+
+watch(
+  [
+    step,
+    source,
+    tallyMode,
+    bridgePairing,
+    bridgeDiscovery,
+    tallyDiscoveryItems,
+    target,
+    selectedCompany,
+    previewEntities,
+  ],
+  saveWizardState,
+  { deep: true },
+)
 
 async function fetchPreview() {
   fetchingPreview.value = true
@@ -1348,9 +1785,6 @@ async function fetchPreview() {
     fetchingPreview.value = false
   }
 }
-
-// Step 3: Source Preview
-const previewEntities = ref([])
 
 function normalizePreviewSamples(samples) {
   return samples.map(sample => {
@@ -1533,6 +1967,7 @@ function handleMigrationResult(result) {
 
 onBeforeUnmount(() => {
   if (pollInterval) clearInterval(pollInterval)
+  stopBridgeAutoRefresh()
 })
 
 // Step 5: Validation

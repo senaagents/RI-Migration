@@ -35,6 +35,10 @@ export default defineConfig(({ command, mode }) => {
           target: frappeUrl,
           changeOrigin: true,
         },
+        '/assets/agentapp_migration': {
+          target: frappeUrl,
+          changeOrigin: true,
+        },
       },
     },
   }

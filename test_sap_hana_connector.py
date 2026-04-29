@@ -104,5 +104,99 @@ class SAPHanaConnectorTest(unittest.TestCase):
 		self.assertIn("pip install hdbcli", str(ctx.exception))
 
 
+class ExtractionFakeCursor:
+	"""A fake cursor that records every SQL it sees and returns minimal data."""
+
+	def __init__(self, connection):
+		self.connection = connection
+		self.description = []
+		self._rows = []
+
+	def execute(self, sql, params=None):
+		self.connection.queries.append((sql, list(params or [])))
+		self.description = [("DocEntry",), ("DocDate",), ("CANCELED",)]
+		# Return one fake row per page request, then empty so iter_query stops.
+		key = (sql, tuple(params or []))
+		if self.connection.served.get(key):
+			self._rows = []
+		else:
+			self.connection.served[key] = True
+			self._rows = [(1, "2025-04-05", "N")]
+
+	def fetchall(self):
+		return self._rows
+
+	def close(self):
+		pass
+
+
+class ExtractionFakeConnection:
+	def __init__(self):
+		self.queries = []
+		self.served = {}
+
+	def cursor(self):
+		return ExtractionFakeCursor(self)
+
+	def close(self):
+		pass
+
+
+class ExtractionTest(unittest.TestCase):
+	def _client(self):
+		conn = ExtractionFakeConnection()
+		client = SAPHanaClient(
+			"forest.rfgb.net", user="LLMRO", password="x",
+			schema="LLM_LIVENEW", connection=conn,
+		)
+		return client, conn
+
+	def test_invoices_filters_cancelled_and_uses_join_for_lines(self):
+		client, conn = self._client()
+		client.get_invoices(date_from="2025-04-01", date_to="2025-04-15", page_size=10)
+		sqls = [q[0] for q in conn.queries]
+		# Header query: filters DocDate range + CANCELED <> 'Y' on OINV.
+		header_sqls = [s for s in sqls if '"OINV"' in s and "JOIN" not in s]
+		self.assertTrue(header_sqls, "expected at least one OINV header query")
+		self.assertIn('"DocDate" >= ?', header_sqls[0])
+		self.assertIn('"DocDate" <= ?', header_sqls[0])
+		self.assertIn('"CANCELED" <> ?', header_sqls[0])
+		self.assertIn("ORDER BY", header_sqls[0])
+		# Line query: JOIN OINV header so the same filter applies, qualified hdr.*
+		line_sqls = [s for s in sqls if '"INV1"' in s and "JOIN" in s]
+		self.assertTrue(line_sqls, "expected one INV1 join query")
+		self.assertIn('hdr."DocDate"', line_sqls[0])
+		self.assertIn('hdr."CANCELED"', line_sqls[0])
+
+	def test_payments_uses_lowercase_canceled_for_orct(self):
+		client, conn = self._client()
+		client.get_payments(date_from="2025-04-01", date_to="2025-04-15", page_size=10)
+		header_sqls = [q[0] for q in conn.queries if '"ORCT"' in q[0] and "JOIN" not in q[0]]
+		self.assertTrue(header_sqls)
+		# Casing matters — HANA quoted identifier 'Canceled' vs 'CANCELED'.
+		self.assertIn('"Canceled" <> ?', header_sqls[0])
+		self.assertNotIn('"CANCELED" <> ?', header_sqls[0])
+
+	def test_journal_entries_default_filters_to_trans_type_30(self):
+		client, conn = self._client()
+		client.get_journal_entries(date_from="2025-04-01", date_to="2025-04-15", page_size=10)
+		header_sqls = [q[0] for q in conn.queries if '"OJDT"' in q[0] and "JOIN" not in q[0]]
+		self.assertTrue(header_sqls)
+		self.assertIn('"TransType" = ?', header_sqls[0])
+		self.assertIn('"StornoToTr" IS NULL', header_sqls[0])
+		# Date column for OJDT is RefDate, not DocDate.
+		self.assertIn('"RefDate" >= ?', header_sqls[0])
+		# Confirm the parameter ordering: date_from, date_to, then trans_type=30.
+		params = [q[1] for q in conn.queries if '"OJDT"' in q[0] and "JOIN" not in q[0]][0]
+		self.assertEqual(params[0], "2025-04-01")
+		self.assertEqual(params[1], "2025-04-15")
+		self.assertEqual(params[2], 30)
+
+	def test_iter_query_requires_order_by(self):
+		client, _ = self._client()
+		with self.assertRaises(ValueError):
+			list(client.iter_query('SELECT * FROM "x"."y"', page_size=10))
+
+
 if __name__ == "__main__":
 	unittest.main()

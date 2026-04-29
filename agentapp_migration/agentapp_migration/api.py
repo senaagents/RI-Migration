@@ -2381,6 +2381,55 @@ def _run_file_migration_job(file_path, company_name, company_abbr, dry_run=False
 
 
 # ---------------------------------------------------------------------------
+# Chart-of-Accounts only (structure, no opening balances)
+# ---------------------------------------------------------------------------
+
+def import_chart_of_accounts_from_file(file_path="", company_name="", company_abbr="", dry_run=False):
+	"""Load ONLY the Chart of Accounts (groups + ledger accounts) from a saved
+	Tally List of Accounts XML. Skips customers/suppliers/items/warehouses and
+	posts no opening balances.
+
+	Call via:
+	  bench --site <site> execute \
+	    agentapp_migration.agentapp_migration.api.import_chart_of_accounts_from_file \
+	    --kwargs '{"file_path": "/path/to/list-of-accounts.xml", \
+	              "company_name": "Avinash Industries", "company_abbr": "AI"}'
+	"""
+	from agentapp_migration.agentapp_migration.parsers.tally import parse_list_of_accounts
+	from agentapp_migration.agentapp_migration.transformers.tally_to_erpnext import transform_accounts
+	from agentapp_migration.agentapp_migration.importers.erpnext import ERPNextImporter
+
+	if not file_path or not company_name or not company_abbr:
+		frappe.throw("file_path, company_name, and company_abbr are required")
+	if isinstance(dry_run, str):
+		dry_run = dry_run.lower() in ("true", "1", "yes")
+
+	with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+		xml_string = f.read()
+
+	parsed = parse_list_of_accounts(xml_string)
+	groups = parsed.get("groups", [])
+	ledgers = parsed.get("ledgers", [])
+
+	# Custodian filter: drop blank/whitespace names
+	groups = [g for g in groups if (g.get("name") or "").strip()]
+	ledgers = [l for l in ledgers if (l.get("name") or "").strip()]
+
+	accounts = transform_accounts(groups, ledgers, company_name, company_abbr)
+
+	importer = ERPNextImporter(company_name, dry_run=dry_run)
+	importer._import_chart_of_accounts(accounts)
+	if not dry_run:
+		frappe.db.commit()
+
+	return {
+		"parsed": {"groups": len(groups), "ledgers": len(ledgers)},
+		"transformed_accounts": len(accounts),
+		"summary": importer.results,
+	}
+
+
+# ---------------------------------------------------------------------------
 # Stock-only migration (for incremental runs)
 # ---------------------------------------------------------------------------
 

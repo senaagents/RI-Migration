@@ -1,5 +1,15 @@
 __pycache__/
 *.pyc
 node_modules/
+node_modules
 dist/
 .vite/
+.DS_Store
+*.egg-info/
+
+# tally_1800 bulk artifacts (binary corpus, decoded SQLites, customer data)
+tally_1800/**/out/
+tally_1800/**/corpus/
+tally_1800/**/live-tally-data/
+*.sqlite3
+*.1800
