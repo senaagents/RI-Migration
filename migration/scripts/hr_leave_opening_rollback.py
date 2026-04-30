@@ -9,8 +9,8 @@ Scope filter (any one of these is sufficient — using all three for safety):
   leave_policy_assignment IN (HR-LPOL-ASSGN-00001..00196)  -- the 196 we just submitted
 
 Runs:
-  bench --site llm.localhost execute agentapp_migration.scripts.hr_leave_opening_rollback.run --kwargs "{'dry_run': True}"
-  bench --site llm.localhost execute agentapp_migration.scripts.hr_leave_opening_rollback.run --kwargs "{'dry_run': False}"
+  bench --site llm.localhost execute migration.scripts.hr_leave_opening_rollback.run --kwargs "{'dry_run': True}"
+  bench --site llm.localhost execute migration.scripts.hr_leave_opening_rollback.run --kwargs "{'dry_run': False}"
 
 Per-row savepoint per scars/frappe-db-rollback-wipes-batched-inserts.md.
 """

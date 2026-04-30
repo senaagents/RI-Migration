@@ -73,7 +73,7 @@ def _load_hdbcli_dbapi():
 	except ImportError as exc:
 		raise SAPHanaDriverMissing(
 			"SAP HANA driver missing. Install with `pip install hdbcli` or "
-			"`pip install agentapp_migration[sap]` in this bench environment."
+			"`pip install migration[sap]` in this bench environment."
 		) from exc
 	return dbapi
 

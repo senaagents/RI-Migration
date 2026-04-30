@@ -2,7 +2,7 @@
 
 Run after `bench --site dev.localhost migrate`:
 
-	bench --site dev.localhost execute agentapp_migration.agentapp_migration.phase1_e2e.run
+	bench --site dev.localhost execute migration.agentapp_migration.phase1_e2e.run
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import json
 import frappe
 from frappe.utils import now_datetime
 
-from agentapp_migration.agentapp_migration import api
+from migration.agentapp_migration import api
 
 
 def run():

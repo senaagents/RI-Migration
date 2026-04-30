@@ -3,10 +3,10 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
-APP_ROOT = Path(__file__).parent / "agentapp_migration"
+APP_ROOT = Path(__file__).parent / "migration"
 sys.path.insert(0, str(APP_ROOT))
 
-from agentapp_migration.connectors.sap_hana import SAPHanaClient, SAPHanaDriverMissing
+from migration.connectors.sap_hana import SAPHanaClient, SAPHanaDriverMissing
 
 
 class FakeCursor:

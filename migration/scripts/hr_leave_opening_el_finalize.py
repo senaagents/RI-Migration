@@ -12,7 +12,7 @@ Atomic try/finally:
   6. Restore EL max_leaves_allowed = 12.
   7. Verify the restore succeeded — if not, raise.
 
-Run: bench --site llm.localhost execute agentapp_migration.scripts.hr_leave_opening_el_finalize.run
+Run: bench --site llm.localhost execute migration.scripts.hr_leave_opening_el_finalize.run
 """
 
 import csv

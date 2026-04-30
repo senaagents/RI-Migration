@@ -24,10 +24,10 @@ Per-row try/except — errors logged to leave_errors.csv, batch continues.
 Run via:
     bench --site llm.localhost execute office_workspace_admin.hr_leave_opening_allocate.run --kwargs '{"dry_run": true}'
 or, since the office/ tree isn't a frappe app, copy this script into
-agentapp_migration/scripts/ and execute via that dotted path:
-    cp <this> apps/agentapp_migration/agentapp_migration/scripts/hr_leave_opening_allocate.py
-    bench --site llm.localhost execute agentapp_migration.scripts.hr_leave_opening_allocate.run --kwargs '{"dry_run": true}'
-    bench --site llm.localhost execute agentapp_migration.scripts.hr_leave_opening_allocate.run --kwargs '{"dry_run": false}'
+migration/scripts/ and execute via that dotted path:
+    cp <this> apps/migration/migration/scripts/hr_leave_opening_allocate.py
+    bench --site llm.localhost execute migration.scripts.hr_leave_opening_allocate.run --kwargs '{"dry_run": true}'
+    bench --site llm.localhost execute migration.scripts.hr_leave_opening_allocate.run --kwargs '{"dry_run": false}'
 """
 
 import csv
