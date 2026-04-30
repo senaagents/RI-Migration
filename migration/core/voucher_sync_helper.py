@@ -2,9 +2,9 @@
 
 Run:
     bench --site avinash.localhost execute \
-      migration.agentapp_migration.voucher_sync_helper.inspect
+      migration.core.voucher_sync_helper.inspect
     bench --site avinash.localhost execute \
-      migration.agentapp_migration.voucher_sync_helper.delete_stale_pairings
+      migration.core.voucher_sync_helper.delete_stale_pairings
 """
 
 import frappe

@@ -29,4 +29,4 @@ talk_to_your_data_sources = [
 ]
 
 # Whitelisted API methods
-# accessible via /api/method/migration.agentapp_migration.migration.api.<method>
+# accessible via /api/method/migration.core.api.<method>

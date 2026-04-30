@@ -30,7 +30,7 @@ from hashlib import sha256
 from typing import Iterable
 
 
-DEFAULT_METHOD_PREFIX = "migration.agentapp_migration.api"
+DEFAULT_METHOD_PREFIX = "migration.core.api"
 INVALID_XML_CHARS = re.compile(r"&#(?:[0-8]|1[0-1]|1[4-9]|2[0-9]|3[01]);")
 MINIMAL_COLLECTION_FIELDS = ["Name", "Guid", "Parent", "AlterId", "MasterId"]
 
