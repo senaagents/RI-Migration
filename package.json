@@ -1,9 +1,0 @@
-{
-  "name": "agentapp-migration",
-  "private": true,
-  "scripts": {
-    "dev": "pnpm --dir agentapp_migration/ui/migration dev",
-    "build": "pnpm --dir agentapp_migration/ui/migration build",
-    "preview": "pnpm --dir agentapp_migration/ui/migration preview"
-  }
-}
