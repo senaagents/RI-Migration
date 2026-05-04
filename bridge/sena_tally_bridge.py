@@ -559,7 +559,9 @@ def parse_tally_ini_data_paths(ini_path: Path) -> list[Path]:
 	if text is None:
 		return []
 	paths: list[Path] = []
-	pattern = re.compile(r"^\s*data\s*path\s*=\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+	# Tally Prime writes `Data = ...`; older docs / variants use `Data Path = ...`.
+	# Accept both. Multiple lines are kept — the .ini may declare more than one.
+	pattern = re.compile(r"^\s*data(?:\s+path)?\s*=\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 	for match in pattern.finditer(text):
 		raw = match.group(1).strip().strip('"').strip("'")
 		if raw:

@@ -1621,6 +1621,17 @@ def ack_bridge_command(connection_id=None, bridge_token=None, command_id=None, s
 	frappe.cache.set_value(_bridge_command_result_key(command_id), payload, expires_in_sec=60 * 60 * 6)
 	if error:
 		doc.last_error = error
+	# Bridge commands like set_data_dir return updated capabilities; merge them
+	# in here so get_bridge_status reflects the change without waiting for the
+	# next heartbeat. Other ack results pass through harmlessly.
+	if status == "Success" and isinstance(result, dict):
+		caps_keys = ("configured_data_dir", "discovered_roots")
+		if any(key in result for key in caps_keys):
+			caps = _parse_json(doc.capabilities_json, default={}) or {}
+			for key in caps_keys:
+				if key in result:
+					caps[key] = result[key]
+			doc.capabilities_json = _json_dumps(caps)
 	doc.last_seen_at = now_datetime()
 	doc.save(ignore_permissions=True)
 	frappe.db.commit()
