@@ -277,8 +277,10 @@ def extract_tagged_field_strings(
     max_bytes: int = 4096,
     min_ascii_ratio: float = 0.70,
     page_size: int = 512,
+    data: bytes | None = None,
 ) -> list[FieldStringHit]:
-    data = path.read_bytes()
+    if data is None:
+        data = path.read_bytes()
     if _should_use_page_aware_tlvs(path, data, page_size, 0):
         return _extract_tagged_field_strings_page_aware(
             path,
@@ -557,6 +559,7 @@ def iter_tlvs(
     max_string_bytes: int = 4096,
     min_printable_ratio: float = 0.85,
     page_size: int = 512,
+    data: bytes | None = None,
 ) -> Iterable[TLVHit]:
     """Yield high-confidence `02 10` TLV fields from a `.1800` file.
 
@@ -565,8 +568,16 @@ def iter_tlvs(
 
     This intentionally skips invalid markers by one byte and advances by the
     TLV length only after the value passes lightweight type validation.
+
+    If `data` is provided, it's used directly — caller has already read the
+    file. Otherwise the file is read from `path`. Lets the orchestrator cache
+    bytes once and feed multiple iterators without redundant I/O + Python
+    bytes allocations.
     """
-    data = path.read_bytes() if max_bytes <= 0 else path.read_bytes()[:max_bytes]
+    if data is None:
+        data = path.read_bytes() if max_bytes <= 0 else path.read_bytes()[:max_bytes]
+    elif max_bytes > 0:
+        data = data[:max_bytes]
     if _should_use_page_aware_tlvs(path, data, page_size, max_bytes):
         yield from _iter_logical_tlvs(
             path,
@@ -621,6 +632,7 @@ def iter_compact_numeric_fields(
     type_hexes: set[str] | None = None,
     max_bytes: int = 0,
     page_size: int = 512,
+    data: bytes | None = None,
 ) -> Iterable[CompactNumericHit]:
     """Yield compact numeric fields observed in TranMgr pages.
 
@@ -629,8 +641,13 @@ def iter_compact_numeric_fields(
 
     The main proven use so far is:
       bb 0b 00 06 <voucher_master_id:u32le> 00 00
+
+    Pass `data` to reuse already-read file bytes; otherwise reads `path`.
     """
-    data = path.read_bytes() if max_bytes <= 0 else path.read_bytes()[:max_bytes]
+    if data is None:
+        data = path.read_bytes() if max_bytes <= 0 else path.read_bytes()[:max_bytes]
+    elif max_bytes > 0:
+        data = data[:max_bytes]
     type_bytes_filter = {bytes.fromhex(t) for t in type_hexes} if type_hexes else COMPACT_NUMERIC_TYPES
     if field_ids is not None and type_hexes is not None:
         seen_offsets: set[int] = set()
@@ -684,13 +701,17 @@ def iter_page_compact_numeric_fields(
     page_size: int = 512,
     header_len: int = 28,
     slot_len: int = 10,
+    data: bytes | None = None,
 ) -> Iterable[CompactNumericHit]:
     """Yield compact numeric fields from page slot blocks.
 
     Observed in `TranMgr.1800`: after the 28-byte page header, fixed 10-byte
     slots run until the first `02 10` TLV marker in that page.
     """
-    data = path.read_bytes() if max_bytes <= 0 else path.read_bytes()[:max_bytes]
+    if data is None:
+        data = path.read_bytes() if max_bytes <= 0 else path.read_bytes()[:max_bytes]
+    elif max_bytes > 0:
+        data = data[:max_bytes]
     type_bytes_filter = {bytes.fromhex(t) for t in type_hexes} if type_hexes else COMPACT_NUMERIC_TYPES
     page_count = len(data) // page_size
     for page_no in range(page_count):
@@ -728,6 +749,7 @@ def iter_extended_numeric_fields(
     type_hexes: set[str] | None = None,
     max_bytes: int = 0,
     page_size: int = 512,
+    data: bytes | None = None,
 ) -> Iterable[CompactNumericHit]:
     """Yield extended 14-byte numeric slots.
 
@@ -737,7 +759,10 @@ def iter_extended_numeric_fields(
     The known high-value use is `type=0009` signed/scaled accounting values
     such as bill amounts, GST bill splits, and journal no-sibling amounts.
     """
-    data = path.read_bytes() if max_bytes <= 0 else path.read_bytes()[:max_bytes]
+    if data is None:
+        data = path.read_bytes() if max_bytes <= 0 else path.read_bytes()[:max_bytes]
+    elif max_bytes > 0:
+        data = data[:max_bytes]
     type_bytes_filter = {bytes.fromhex(t) for t in type_hexes} if type_hexes else EXTENDED_NUMERIC_TYPES
     search_from = 0
     while True:
@@ -767,6 +792,7 @@ def iter_vch_status_slots(
     max_bytes: int = 0,
     page_size: int = 512,
     slot_size: int = 128,
+    data: bytes | None = None,
 ) -> Iterable[VchStatusSlot]:
     """Yield non-empty fixed slots from `VchStatus.1800`-style files.
 
@@ -778,7 +804,10 @@ def iter_vch_status_slots(
 
     The slot-to-voucher ordering is not solved; this exposes the evidence.
     """
-    data = path.read_bytes() if max_bytes <= 0 else path.read_bytes()[:max_bytes]
+    if data is None:
+        data = path.read_bytes() if max_bytes <= 0 else path.read_bytes()[:max_bytes]
+    elif max_bytes > 0:
+        data = data[:max_bytes]
     if page_size < 512 or slot_size != 128:
         slot_offsets = (page_size // 4, page_size // 2, (page_size * 3) // 4)
     else:

@@ -34,7 +34,7 @@ from tempfile import TemporaryDirectory
 from typing import Iterable
 
 
-__version__ = "0.2.5"
+__version__ = "0.2.6"
 
 # PyInstaller's `--windowed` / `console=False` exe runs without an attached
 # console: `sys.stdout` exists but every write to it raises
@@ -1385,9 +1385,37 @@ def run_1800_extract(config: BridgeConfig, connection_id: str, bridge_token: str
 	source_dir = Path(company["folder"])
 	log(f"Running .1800 decode for {company.get('company_name') or company_id}...")
 	heartbeat(config, connection_id, bridge_token, status="Syncing", last_error=f"1800 decode started for {company_id}")
+
+	# Track stage timings + heartbeat each phase so the UI can show progress.
+	# Throttle heartbeats to once per stage, not once per progress callback,
+	# to avoid hammering the backend on tight inner loops.
+	stage_start = time.time()
+	last_heartbeat_stage = -1
+
+	def _on_progress(stage_idx: int, total: int, name: str, detail: str) -> None:
+		nonlocal stage_start, last_heartbeat_stage
+		now = time.time()
+		elapsed = now - stage_start
+		stage_start = now
+		log(f"  [decode {stage_idx}/{total}] {name} (+{elapsed:.1f}s) {detail}".rstrip())
+		# One heartbeat per stage transition. last_error carries the phase
+		# label so get_bridge_status / get_bridge_command_status can surface it.
+		if stage_idx != last_heartbeat_stage:
+			last_heartbeat_stage = stage_idx
+			try:
+				heartbeat(
+					config, connection_id, bridge_token,
+					status="Syncing",
+					last_error=f"decode {stage_idx}/{total}: {name}",
+				)
+			except Exception:
+				# Progress is best-effort. Never let a heartbeat failure
+				# break the actual decode.
+				pass
+
 	with TemporaryDirectory(prefix="sena-tally-1800-") as tmp:
 		out_path = Path(tmp) / f"{company_id}_decoded.sqlite3"
-		export_decoded_sqlite(source_dir, out_path)
+		export_decoded_sqlite(source_dir, out_path, progress=_on_progress)
 		counts = decoded_table_counts(out_path)
 		summary = {
 			"decode_id": uuid.uuid4().hex[:12],

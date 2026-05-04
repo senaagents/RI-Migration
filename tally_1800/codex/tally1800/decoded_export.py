@@ -7,7 +7,7 @@ import struct
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from .probe import (
     discover_files,
@@ -1102,9 +1102,9 @@ def _insert_field_strings(conn: sqlite3.Connection, file_name: str, hits) -> Non
     )
 
 
-def _insert_raw_tlvs(conn: sqlite3.Connection, path: Path) -> None:
+def _insert_raw_tlvs(conn: sqlite3.Connection, path: Path, data: bytes | None = None) -> None:
     rows = []
-    for hit in iter_tlvs(path):
+    for hit in iter_tlvs(path, data=data):
         decoded_text = hit.decoded if isinstance(hit.decoded, str) else None
         decoded_number = hit.decoded if isinstance(hit.decoded, (int, float)) else None
         rows.append(
@@ -1144,7 +1144,11 @@ def _insert_raw_tlvs(conn: sqlite3.Connection, path: Path) -> None:
         )
 
 
-def _insert_tranmgr_compact_fields(conn: sqlite3.Connection, path: Path) -> None:
+def _insert_tranmgr_compact_fields(conn: sqlite3.Connection, path: Path, data: bytes | None = None) -> None:
+    # 5 (field_id, type_hex) pairs we care about. Old code did 5 separate
+    # iter_compact_numeric_fields walks; we now do ONE walk with the union of
+    # filters, then dispatch per (field_id, type_hex) into the right buckets.
+    # That's 5x less Python-level scanning over a multi-hundred-MB file.
     wanted = {
         (0x0BBB, "0006"),  # voucher MASTERID
         (0x0BBB, "0003"),  # voucher type MASTERID candidate on many pages
@@ -1152,8 +1156,9 @@ def _insert_tranmgr_compact_fields(conn: sqlite3.Connection, path: Path) -> None
         (0x0BBF, "0006"),  # sparse candidate order/link field
         (0x0067, "000d"),  # voucher date serial candidate
     }
+    if data is None:
+        data = path.read_bytes()
     all_rows = []
-    data = path.read_bytes()
     page_group_ids = [
         struct.unpack_from("<I", data, page_no * 512 + 4)[0]
         for page_no in range(len(data) // 512)
@@ -1163,22 +1168,29 @@ def _insert_tranmgr_compact_fields(conn: sqlite3.Connection, path: Path) -> None
         page_group_counts[group_id] += 1
     date_by_page: dict[int, int] = {}
     master_rows = []
-    for field_id, type_hex in wanted:
-        for hit in iter_compact_numeric_fields(path, field_ids={field_id}, type_hexes={type_hex}):
-            row = (
-                hit.file_name,
-                hit.page_no,
-                hit.page_offset,
-                hit.offset,
-                hit.field_id,
-                hit.type_hex,
-                hit.value,
-            )
-            all_rows.append(row)
-            if field_id == 0x0067 and type_hex == "000d":
-                date_by_page[hit.page_no] = hit.value
-            elif field_id == 0x0BBB and type_hex == "0006":
-                master_rows.append(hit)
+    wanted_field_ids = {fid for fid, _ in wanted}
+    wanted_type_hexes = {th for _, th in wanted}
+    for hit in iter_compact_numeric_fields(
+        path,
+        field_ids=wanted_field_ids,
+        type_hexes=wanted_type_hexes,
+        data=data,
+    ):
+        if (hit.field_id, hit.type_hex) not in wanted:
+            continue
+        all_rows.append((
+            hit.file_name,
+            hit.page_no,
+            hit.page_offset,
+            hit.offset,
+            hit.field_id,
+            hit.type_hex,
+            hit.value,
+        ))
+        if hit.field_id == 0x0067 and hit.type_hex == "000d":
+            date_by_page[hit.page_no] = hit.value
+        elif hit.field_id == 0x0BBB and hit.type_hex == "0006":
+            master_rows.append(hit)
     conn.executemany(
         """
         insert into compact_numeric_fields
@@ -1251,9 +1263,9 @@ def _insert_tranmgr_compact_fields(conn: sqlite3.Connection, path: Path) -> None
     )
 
 
-def _insert_extended_numeric_fields(conn: sqlite3.Connection, path: Path) -> None:
+def _insert_extended_numeric_fields(conn: sqlite3.Connection, path: Path, data: bytes | None = None) -> None:
     rows = []
-    for hit in iter_extended_numeric_fields(path, type_hexes={"0009"}):
+    for hit in iter_extended_numeric_fields(path, type_hexes={"0009"}, data=data):
         rows.append(
             (
                 hit.file_name,
@@ -1286,7 +1298,7 @@ def _insert_extended_numeric_fields(conn: sqlite3.Connection, path: Path) -> Non
         )
 
 
-def _insert_vch_status_slots(conn: sqlite3.Connection, path: Path) -> None:
+def _insert_vch_status_slots(conn: sqlite3.Connection, path: Path, data: bytes | None = None) -> None:
     conn.executemany(
         """
         insert into vch_status_slots
@@ -1310,13 +1322,14 @@ def _insert_vch_status_slots(conn: sqlite3.Connection, path: Path) -> None:
                 slot.word26_state_or_flag,
                 json.dumps(slot.words),
             )
-            for slot in iter_vch_status_slots(path)
+            for slot in iter_vch_status_slots(path, data=data)
         ],
     )
 
 
-def _export_statutory_status(conn: sqlite3.Connection, path: Path) -> None:
-    data = path.read_bytes()
+def _export_statutory_status(conn: sqlite3.Connection, path: Path, data: bytes | None = None) -> None:
+    if data is None:
+        data = path.read_bytes()
     page_size = 512
     slot_size = 0x80
     slot_offsets = (0x80, 0x100, 0x180)
@@ -1570,8 +1583,9 @@ def _linkmgr_source_json(
     )
 
 
-def _export_linkmgr_allocation_pages(conn: sqlite3.Connection, path: Path) -> None:
-    data = path.read_bytes()
+def _export_linkmgr_allocation_pages(conn: sqlite3.Connection, path: Path, data: bytes | None = None) -> None:
+    if data is None:
+        data = path.read_bytes()
     page_size = 512
     voucher_ids = {
         int(master_id)
@@ -1944,8 +1958,9 @@ def _first_matching(values: list[str], pattern: re.Pattern[str]) -> str | None:
     return None
 
 
-def _export_invoice_metadata(conn: sqlite3.Connection, tran_path: Path) -> None:
-    data = tran_path.read_bytes()
+def _export_invoice_metadata(conn: sqlite3.Connection, tran_path: Path, data: bytes | None = None) -> None:
+    if data is None:
+        data = tran_path.read_bytes()
     fields_by_record: dict[int, dict[int, list[str]]] = defaultdict(lambda: defaultdict(list))
     offsets_by_record: dict[int, dict[int, list[int]]] = defaultdict(lambda: defaultdict(list))
     pages_by_record: dict[int, set[int]] = defaultdict(set)
@@ -2048,8 +2063,9 @@ def _export_invoice_metadata(conn: sqlite3.Connection, tran_path: Path) -> None:
     )
 
 
-def _export_einvoice_archive(conn: sqlite3.Connection, tran_path: Path) -> None:
-    data = tran_path.read_bytes()
+def _export_einvoice_archive(conn: sqlite3.Connection, tran_path: Path, data: bytes | None = None) -> None:
+    if data is None:
+        data = tran_path.read_bytes()
     fields_by_archive: dict[tuple[int, int], dict[int, list[str]]] = defaultdict(lambda: defaultdict(list))
     offsets_by_archive: dict[tuple[int, int], dict[int, list[int]]] = defaultdict(lambda: defaultdict(list))
     pages_by_archive: dict[tuple[int, int], set[int]] = defaultdict(set)
@@ -2241,8 +2257,9 @@ def _export_company(conn: sqlite3.Connection, hits) -> None:
     )
 
 
-def _export_manager_records(conn: sqlite3.Connection, manager_path: Path, hits) -> None:
-    data = manager_path.read_bytes()
+def _export_manager_records(conn: sqlite3.Connection, manager_path: Path, hits, data: bytes | None = None) -> None:
+    if data is None:
+        data = manager_path.read_bytes()
     by_page = defaultdict(list)
     for hit in hits:
         if hit.file_name == "Manager.1800":
@@ -2367,8 +2384,8 @@ def _export_manager_records(conn: sqlite3.Connection, manager_path: Path, hits) 
     )
 
 
-def _export_manager_master_kind_guesses(conn: sqlite3.Connection, manager_path: Path) -> None:
-    manager_data = manager_path.read_bytes()
+def _export_manager_master_kind_guesses(conn: sqlite3.Connection, manager_path: Path, data: bytes | None = None) -> None:
+    manager_data = data if data is not None else manager_path.read_bytes()
     pages_by_master: dict[int, list[int]] = defaultdict(list)
     for master_id, page_no in conn.execute(
         """
@@ -2678,7 +2695,7 @@ def _fits_sqlite_i64(value: int | None) -> bool:
     return value is None or SQLITE_I64_MIN <= value <= SQLITE_I64_MAX
 
 
-def _export_inventory_candidates(conn: sqlite3.Connection, tran_path: Path) -> None:
+def _export_inventory_candidates(conn: sqlite3.Connection, tran_path: Path, data: bytes | None = None) -> None:
     stock_ids = {
         int(row[0])
         for row in conn.execute(
@@ -2757,7 +2774,7 @@ def _export_inventory_candidates(conn: sqlite3.Connection, tran_path: Path) -> N
         )
 
     rows = build_inventory_candidates(
-        tran_path.read_bytes(),
+        data if data is not None else tran_path.read_bytes(),
         group_to_mid,
         voucher_type_by_mid,
         stock_ids,
@@ -2810,7 +2827,7 @@ def _export_inventory_candidates(conn: sqlite3.Connection, tran_path: Path) -> N
     )
 
 
-def _export_ledger_candidates(conn: sqlite3.Connection, tran_path: Path) -> None:
+def _export_ledger_candidates(conn: sqlite3.Connection, tran_path: Path, data: bytes | None = None) -> None:
     ledger_rows = [
         (int(master_id), name)
         for master_id, name in conn.execute(
@@ -2867,7 +2884,7 @@ def _export_ledger_candidates(conn: sqlite3.Connection, tran_path: Path) -> None
     """
     batch = []
     for row in iter_ledger_candidates(
-        tran_path.read_bytes(),
+        data if data is not None else tran_path.read_bytes(),
         vouchers,
         ledger_ids,
         ledger_names,
@@ -3263,8 +3280,9 @@ def _export_decode_audit(conn: sqlite3.Connection) -> None:
     )
 
 
-def _export_voucher_text_pages(conn: sqlite3.Connection, tran_path: Path, hits) -> None:
-    data = tran_path.read_bytes()
+def _export_voucher_text_pages(conn: sqlite3.Connection, tran_path: Path, hits, data: bytes | None = None) -> None:
+    if data is None:
+        data = tran_path.read_bytes()
     by_page = defaultdict(list)
     for hit in hits:
         if hit.file_name == "TranMgr.1800":
@@ -3325,12 +3343,77 @@ def _export_voucher_text_pages(conn: sqlite3.Connection, tran_path: Path, hits) 
     )
 
 
-def export_decoded_sqlite(company_dir: Path, out_path: Path) -> None:
+HIGH_VALUE_FILES = {
+    "Company.1800", "CmpSave.1800", "Manager.1800", "TranMgr.1800",
+    "LinkMgr.1800", "Aggr.1800", "CfgRept.1800",
+}
+
+
+def export_decoded_sqlite(
+    company_dir: Path,
+    out_path: Path,
+    progress: "Callable[[int, int, str, str], None] | None" = None,
+) -> None:
+    """Decode all .1800 files in `company_dir` into a SQLite at `out_path`.
+
+    `progress(stage_index, total_stages, name, detail)` is called at the start
+    of each major stage so callers can render progress + measure timings.
+    Stage names are stable strings safe to surface to users.
+
+    Bytes for each file are read at most once and threaded through every
+    consumer; old code re-read each file 2-9 times on disk + redundantly
+    parsed in Python. Eliminates the dominant non-CPU cost.
+    """
+    def _report(idx: int, total: int, name: str, detail: str = "") -> None:
+        if progress is not None:
+            try:
+                progress(idx, total, name, detail)
+            except Exception:
+                pass
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if out_path.exists():
         out_path.unlink()
     files = discover_files(company_dir)
     file_map = {f.name: f for f in files}
+
+    # Conditional stage list — count only the stages that will actually run
+    # (e.g. _export_voucher_text_pages skips if TranMgr.1800 is missing).
+    stages: list[str] = ["init"]
+    high_value_in_dir = [f for f in files if f.name in HIGH_VALUE_FILES]
+    for f in high_value_in_dir:
+        stages.append(f"raw_tlvs+field_strings:{f.name}")
+    stages.append("export_company")
+    if "Manager.1800" in file_map:
+        stages.append("manager_records")
+    if "TranMgr.1800" in file_map:
+        stages.extend(["tranmgr_voucher_text_pages", "tranmgr_compact_fields", "tranmgr_extended_numerics"])
+    if "VchStatus.1800" in file_map:
+        stages.extend(["vch_status_slots", "pair_voucher_types"])
+    if "Manager.1800" in file_map:
+        stages.extend(["manager_master_kind_guesses", "typed_master_tables"])
+    if "StatStatus.1800" in file_map:
+        stages.append("statutory_status")
+    if "LinkMgr.1800" in file_map:
+        stages.append("linkmgr_allocation_pages")
+    if "TranMgr.1800" in file_map:
+        stages.extend([
+            "inventory_candidates", "best_inventory",
+            "ledger_candidates", "best_ledger",
+            "invoice_metadata", "einvoice_archive",
+            "decode_audit",
+        ])
+    total = len(stages)
+
+    # Read each high-value file once. ~1 GB peak for a heavy company; freed
+    # when this dict goes out of scope at function return.
+    file_bytes: dict[str, bytes] = {}
+    stage_idx = 0
+    _report(stage_idx, total, "init", "reading files + computing hashes")
+    stage_idx += 1
+    for f in high_value_in_dir:
+        file_bytes[f.name] = f.path.read_bytes()
+
     with sqlite3.connect(out_path) as conn:
         conn.executescript(DECODED_SCHEMA)
         conn.executemany(
@@ -3341,37 +3424,77 @@ def export_decoded_sqlite(company_dir: Path, out_path: Path) -> None:
             [(f.name, str(f.path), f.role, f.size, sha256_file(f.path)) for f in files],
         )
         all_hits = []
-        for data_file in files:
-            # These are the high-value files for first-pass semantic decoding.
-            if data_file.name not in {"Company.1800", "CmpSave.1800", "Manager.1800", "TranMgr.1800", "LinkMgr.1800", "Aggr.1800", "CfgRept.1800"}:
-                continue
-            _insert_raw_tlvs(conn, data_file.path)
-            hits = extract_tagged_field_strings(data_file.path, min_chars=1)
+        for data_file in high_value_in_dir:
+            _report(stage_idx, total, f"raw_tlvs+field_strings:{data_file.name}", "")
+            stage_idx += 1
+            file_data = file_bytes[data_file.name]
+            _insert_raw_tlvs(conn, data_file.path, data=file_data)
+            hits = extract_tagged_field_strings(data_file.path, min_chars=1, data=file_data)
             all_hits.extend(hits)
             _insert_field_strings(conn, data_file.name, hits)
+        _report(stage_idx, total, "export_company", "")
+        stage_idx += 1
         _export_company(conn, all_hits)
         if "Manager.1800" in file_map:
-            _export_manager_records(conn, file_map["Manager.1800"].path, all_hits)
+            _report(stage_idx, total, "manager_records", "")
+            stage_idx += 1
+            _export_manager_records(conn, file_map["Manager.1800"].path, all_hits, data=file_bytes.get("Manager.1800"))
         if "TranMgr.1800" in file_map:
-            _export_voucher_text_pages(conn, file_map["TranMgr.1800"].path, all_hits)
-            _insert_tranmgr_compact_fields(conn, file_map["TranMgr.1800"].path)
-            _insert_extended_numeric_fields(conn, file_map["TranMgr.1800"].path)
+            tran_path = file_map["TranMgr.1800"].path
+            tran_data = file_bytes.get("TranMgr.1800")
+            _report(stage_idx, total, "tranmgr_voucher_text_pages", "")
+            stage_idx += 1
+            _export_voucher_text_pages(conn, tran_path, all_hits, data=tran_data)
+            _report(stage_idx, total, "tranmgr_compact_fields", "")
+            stage_idx += 1
+            _insert_tranmgr_compact_fields(conn, tran_path, data=tran_data)
+            _report(stage_idx, total, "tranmgr_extended_numerics", "")
+            stage_idx += 1
+            _insert_extended_numeric_fields(conn, tran_path, data=tran_data)
         if "VchStatus.1800" in file_map:
+            _report(stage_idx, total, "vch_status_slots", "")
+            stage_idx += 1
             _insert_vch_status_slots(conn, file_map["VchStatus.1800"].path)
+            _report(stage_idx, total, "pair_voucher_types", "")
+            stage_idx += 1
             _pair_voucher_types_from_status(conn)
         if "Manager.1800" in file_map:
-            _export_manager_master_kind_guesses(conn, file_map["Manager.1800"].path)
+            _report(stage_idx, total, "manager_master_kind_guesses", "")
+            stage_idx += 1
+            _export_manager_master_kind_guesses(conn, file_map["Manager.1800"].path, data=file_bytes.get("Manager.1800"))
+            _report(stage_idx, total, "typed_master_tables", "")
+            stage_idx += 1
             _export_typed_master_tables(conn)
         if "StatStatus.1800" in file_map:
+            _report(stage_idx, total, "statutory_status", "")
+            stage_idx += 1
             _export_statutory_status(conn, file_map["StatStatus.1800"].path)
         if "LinkMgr.1800" in file_map:
-            _export_linkmgr_allocation_pages(conn, file_map["LinkMgr.1800"].path)
+            _report(stage_idx, total, "linkmgr_allocation_pages", "")
+            stage_idx += 1
+            _export_linkmgr_allocation_pages(conn, file_map["LinkMgr.1800"].path, data=file_bytes.get("LinkMgr.1800"))
         if "TranMgr.1800" in file_map:
-            _export_inventory_candidates(conn, file_map["TranMgr.1800"].path)
+            tran_path = file_map["TranMgr.1800"].path
+            tran_data = file_bytes.get("TranMgr.1800")
+            _report(stage_idx, total, "inventory_candidates", "")
+            stage_idx += 1
+            _export_inventory_candidates(conn, tran_path, data=tran_data)
+            _report(stage_idx, total, "best_inventory", "")
+            stage_idx += 1
             _export_best_inventory_entries(conn)
-            _export_ledger_candidates(conn, file_map["TranMgr.1800"].path)
+            _report(stage_idx, total, "ledger_candidates", "")
+            stage_idx += 1
+            _export_ledger_candidates(conn, tran_path, data=tran_data)
+            _report(stage_idx, total, "best_ledger", "")
+            stage_idx += 1
             _export_best_ledger_entries(conn)
-            _export_invoice_metadata(conn, file_map["TranMgr.1800"].path)
-            _export_einvoice_archive(conn, file_map["TranMgr.1800"].path)
+            _report(stage_idx, total, "invoice_metadata", "")
+            stage_idx += 1
+            _export_invoice_metadata(conn, tran_path, data=tran_data)
+            _report(stage_idx, total, "einvoice_archive", "")
+            stage_idx += 1
+            _export_einvoice_archive(conn, tran_path, data=tran_data)
+            _report(stage_idx, total, "decode_audit", "")
+            stage_idx += 1
             _export_decode_audit(conn)
         conn.commit()

@@ -15,7 +15,7 @@
 ; uncomment SignTool below + add the corresponding Inno Setup signtool entry.
 
 #define MyAppName        "Sena Tally Bridge"
-#define MyAppVersion     "0.2.5"
+#define MyAppVersion     "0.2.6"
 #define MyAppPublisher   "Sena"
 #define MyAppExeName     "SenaTallyBridge.exe"
 #define MyAppTaskName    "SenaTallyBridge"

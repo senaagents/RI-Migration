@@ -3220,6 +3220,7 @@ def _bridge_response_paired(row):
 		"pairing_expires_at": None,
 		"configured_data_dir": caps.get("configured_data_dir") or "",
 		"discovered_roots": [str(p) for p in discovered_roots],
+		"last_error": row.get("last_error") or "",
 	}
 
 
@@ -3287,7 +3288,7 @@ def get_bridge_status():
 			fields=[
 				"name", "status", "last_seen_at", "tally_version",
 				"capabilities_json", "bridge_id", "pairing_code",
-				"pairing_expires_at", "modified",
+				"pairing_expires_at", "modified", "last_error",
 			],
 			order_by="modified desc",
 			limit_page_length=20,
