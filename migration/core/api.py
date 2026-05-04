@@ -3170,7 +3170,7 @@ def _run_tally_xml_parse_job(file_doc_name, owner_user, progress_id):
 _TALLY_BRIDGE_LABEL = "Tally bridge"
 _MANUAL_UPLOAD_LABEL = "Tally manual XML upload"
 _BRIDGE_PAIRED_STATUSES = ("Active", "Syncing")
-_BRIDGE_STALE_SECONDS = 150
+_BRIDGE_STALE_SECONDS = 1800
 
 
 def _bridge_is_recent(last_seen_at):
@@ -3263,23 +3263,30 @@ def get_bridge_status():
 				"pairing_expires_at", "modified",
 			],
 			order_by="modified desc",
-			limit_page_length=1,
+			limit_page_length=20,
 		)
 
-		if rows:
-			row = rows[0]
+		offline_updates = []
+		for row in rows:
 			status = row.get("status") or ""
 			if status in _BRIDGE_PAIRED_STATUSES and row.get("bridge_id"):
 				if _bridge_is_recent(row.get("last_seen_at")):
 					return _api_ok(message="Bridge connected", data=_bridge_response_paired(row))
-				frappe.db.set_value(
-					INTEGRATION_CONNECTION_DOCTYPE,
-					row.get("name"),
-					"status",
-					"Offline",
-					update_modified=False,
-				)
-				frappe.db.commit()
+				offline_updates.append(row.get("name"))
+
+		for name in offline_updates:
+			frappe.db.set_value(
+				INTEGRATION_CONNECTION_DOCTYPE,
+				name,
+				"status",
+				"Offline",
+				update_modified=False,
+			)
+		if offline_updates:
+			frappe.db.commit()
+
+		for row in rows:
+			status = row.get("status") or ""
 			if status == "Pairing":
 				expires = row.get("pairing_expires_at")
 				if expires and now_datetime() < frappe.utils.get_datetime(expires):

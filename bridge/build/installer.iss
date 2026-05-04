@@ -198,9 +198,9 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  // ssPostInstall fires after [Files] copy, so {app}\ exists; ssInstall
-  // fires *before* file copy and the directory may not exist yet — that
-  // was the cause of "Failed to write bridge-config.json" on first install.
-  if CurStep = ssPostInstall then
+  // Write the config before [Run] registers/starts the scheduled task.
+  // WriteBridgeConfig creates {app} defensively, so this is safe even
+  // before [Files] has copied the exe.
+  if CurStep = ssInstall then
     WriteBridgeConfig();
 end;
