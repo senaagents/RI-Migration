@@ -18,6 +18,7 @@ import argparse
 import http.client
 from html import escape
 import json
+import os
 import re
 import sys
 import time
@@ -31,6 +32,17 @@ from typing import Iterable
 
 
 __version__ = "0.1.0"
+
+# PyInstaller's `--windowed` / `console=False` exe runs without an attached
+# console: `sys.stdout` exists but every write to it raises
+# `OSError [Errno 22] Invalid argument`, which crashes the bridge on the
+# first print() before any logging gets surfaced. Redirect to NUL up front
+# so prints become silent no-ops; main() will swap to the real log file
+# once it's parsed --log-file. Only do this when frozen — running the
+# script under a real Python keeps the normal terminal output.
+if getattr(sys, "frozen", False):
+	sys.stdout = open(os.devnull, "w", encoding="utf-8")
+	sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 DEFAULT_METHOD_PREFIX = "migration.core.api"
 INVALID_XML_CHARS = re.compile(r"&#(?:[0-8]|1[0-1]|1[4-9]|2[0-9]|3[01]);")
@@ -1024,7 +1036,8 @@ def self_test() -> int:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
 	parser = argparse.ArgumentParser(description="Sena Tally Bridge for Migration")
-	parser.add_argument("--config", help="Path to bridge-config.json — overrides individual flags")
+	parser.add_argument("--config", help="Path to bridge-config.json - overrides individual flags")
+	parser.add_argument("--log-file", default="", help="Append all bridge output to this file (auto-created)")
 	parser.add_argument("--server", help="Sena/Frappe server base URL, for example http://localhost:8001")
 	parser.add_argument("--pairing-code", help="Pairing code displayed in Migration")
 	parser.add_argument("--tally-host", default="localhost")
@@ -1052,13 +1065,25 @@ def _load_config_file(path: str) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
 	args = parse_args(argv or sys.argv[1:])
-	if args.self_test:
-		return self_test()
 
 	# Config file beats individual flags. CLI flags fill in anything the
 	# JSON omits, so existing PowerShell installs that pass --server etc.
 	# still work for the deprecation window.
 	cfg = _load_config_file(args.config) if args.config else {}
+
+	# Wire stdout/stderr to the requested log file. The frozen-exe redirect
+	# at module import sent them to NUL so import-time prints don't crash;
+	# this swap moves real runtime output to a durable location. Line-
+	# buffered (buffering=1) so tailing the file shows progress live.
+	log_path = (cfg.get("log_file") or args.log_file or "").strip()
+	if log_path:
+		os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
+		fh = open(log_path, "a", encoding="utf-8", buffering=1)
+		sys.stdout = fh
+		sys.stderr = fh
+
+	if args.self_test:
+		return self_test()
 
 	server = cfg.get("server") or args.server
 	pairing_code = cfg.get("pairing_code") or args.pairing_code

@@ -11,7 +11,7 @@ param(
 # command writes bridge stdout/stderr to a daily-rotated log under
 # $LogDir so the user can troubleshoot without the bridge having any UI.
 #
-# Re-registration is idempotent — Unregister-ScheduledTask first if the
+# Re-registration is idempotent - Unregister-ScheduledTask first if the
 # task already exists from a previous install.
 
 $ErrorActionPreference = "Stop"
@@ -30,14 +30,14 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
-# We wrap the bridge in a tiny PowerShell command rather than calling
-# the exe directly so we can redirect stdout to a dated log file.
+# The bridge exe owns its own stdout/stderr redirection now (via
+# --log-file), so we can run it directly without a PowerShell wrapper.
+# That removes a layer where output buffering / encoding could go wrong.
 $LogTemplate = Join-Path $LogDir "bridge-$(Get-Date -Format yyyy-MM-dd).log"
-$Command = "& `"$ExePath`" --config `"$ConfigPath`" *>> `"$LogTemplate`""
 
 $Action = New-ScheduledTaskAction `
-  -Execute "powershell.exe" `
-  -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$Command`""
+  -Execute $ExePath `
+  -Argument "--config `"$ConfigPath`" --log-file `"$LogTemplate`""
 
 # At logon (current user only). RunLevel Limited = ordinary user
 # privileges, no UAC elevation prompt.
@@ -61,6 +61,6 @@ Register-ScheduledTask `
   -Trigger $Trigger `
   -Settings $Settings `
   -Principal $Principal `
-  -Description "Sena Tally Bridge — auto-syncs Tally Prime data to Sena. Edit %LOCALAPPDATA%\SenaTallyBridge\bridge-config.json to reconfigure." | Out-Null
+  -Description "Sena Tally Bridge - auto-syncs Tally Prime data to Sena. Edit %LOCALAPPDATA%\SenaTallyBridge\bridge-config.json to reconfigure." | Out-Null
 
 Write-Host "Registered scheduled task '$TaskName' for user $env:USERNAME"
