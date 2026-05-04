@@ -3129,61 +3129,105 @@ def _run_tally_xml_parse_job(file_doc_name, owner_user, progress_id):
 		raise
 
 
+_TALLY_BRIDGE_LABEL = "Tally bridge"
+_MANUAL_UPLOAD_LABEL = "Tally manual XML upload"
+_BRIDGE_PAIRED_STATUSES = ("Active", "Syncing", "Offline")
+
+
+def _bridge_response_paired(row):
+	"""Build the get_bridge_status payload for a paired connection row."""
+	caps = _parse_json(row.get("capabilities_json"), default={}) or {}
+	last_heartbeat = row.get("last_seen_at")
+	return {
+		"paired": True,
+		"last_heartbeat": str(last_heartbeat) if last_heartbeat else None,
+		"bridge_app_version": caps.get("bridge_version") or None,
+		"tally_version": row.get("tally_version") or None,
+		"connection_id": row.get("name"),
+		"pairing_code": None,
+		"pairing_expires_at": None,
+	}
+
+
+def _bridge_response_pending(row):
+	"""Build the get_bridge_status payload for an in-progress pairing."""
+	expires = row.get("pairing_expires_at")
+	return {
+		"paired": False,
+		"last_heartbeat": None,
+		"bridge_app_version": None,
+		"tally_version": None,
+		"connection_id": row.get("name"),
+		"pairing_code": row.get("pairing_code"),
+		"pairing_expires_at": str(expires) if expires else None,
+	}
+
+
+def _create_bridge_pairing_for_session():
+	"""Generate a fresh Pairing-status connection for the current user."""
+	pairing = create_integration_tally_pairing(connection_label=_TALLY_BRIDGE_LABEL)
+	return {
+		"paired": False,
+		"last_heartbeat": None,
+		"bridge_app_version": None,
+		"tally_version": None,
+		"connection_id": pairing["connection_id"],
+		"pairing_code": pairing["pairing_code"],
+		"pairing_expires_at": pairing["expires_at"],
+	}
+
+
 @frappe.whitelist()
 def get_bridge_status():
-	"""Return the most recent bridge pairing/heartbeat state for this user.
+	"""Return the bridge state for this user, creating a pairing on demand.
 
-	Read-only — surfaces what the existing pairing + heartbeat machinery
-	already records on `Integration Source Connection`. No state changes.
+	Three states this can resolve to:
+
+	  - **Paired**: most recent connection is in Active/Syncing/Offline.
+	    Returns connection details + bridge_app_version. The desktop bridge
+	    has claimed and is heartbeating.
+	  - **Pending**: a Pairing-status connection exists and hasn't expired
+	    yet. Returns its `pairing_code` so the UI can render it for the
+	    installer wizard.
+	  - **Empty / expired**: no connection at all, or the previous pairing
+	    expired. We create a fresh pairing on the spot and return its code.
+
+	The "create on read" behaviour is the pragmatic shape — the
+	BridgeConnect view always has *something* to show, and a refresh after
+	expiry just generates a new code. Manual XML upload connections share
+	the doctype but use a different label, so we filter those out.
 	"""
 	try:
 		_require_integration_user()
 
-		# Bridge connections are Tally connections that were claimed by a
-		# desktop bridge — those rows always have a bridge_id set. Manual
-		# XML uploads use the same source_type but never get a bridge_id,
-		# so we filter them out here to avoid reporting a "paired" status
-		# that the bridge never actually established.
 		rows = frappe.get_all(
 			INTEGRATION_CONNECTION_DOCTYPE,
 			filters={
 				"owner_user": frappe.session.user,
 				"source_type": ("in", _BRIDGE_SOURCE_TYPES),
-				"bridge_id": ("is", "set"),
+				"connection_label": ("!=", _MANUAL_UPLOAD_LABEL),
 			},
 			fields=[
 				"name", "status", "last_seen_at", "tally_version",
-				"capabilities_json", "bridge_id", "modified",
+				"capabilities_json", "bridge_id", "pairing_code",
+				"pairing_expires_at", "modified",
 			],
 			order_by="modified desc",
 			limit_page_length=1,
 		)
 
-		if not rows:
-			data = {
-				"paired": False,
-				"last_heartbeat": None,
-				"bridge_app_version": None,
-				"tally_version": None,
-				"connection_id": None,
-			}
-		else:
+		if rows:
 			row = rows[0]
-			paired = (row.get("status") or "") in ("Active", "Syncing", "Offline")
-			last_heartbeat = row.get("last_seen_at")
-			# Bridge app version lives inside capabilities_json under
-			# `bridge_version`. The doctype's `tally_version` column is
-			# Tally Prime's version (different thing). Older code conflated
-			# these — surface them as separate fields now.
-			caps = _parse_json(row.get("capabilities_json"), default={}) or {}
-			data = {
-				"paired": bool(paired),
-				"last_heartbeat": str(last_heartbeat) if last_heartbeat else None,
-				"bridge_app_version": caps.get("bridge_version") or None,
-				"tally_version": row.get("tally_version") or None,
-				"connection_id": row.get("name"),
-			}
-		return _api_ok(message="Bridge status fetched", data=data)
+			status = row.get("status") or ""
+			if status in _BRIDGE_PAIRED_STATUSES and row.get("bridge_id"):
+				return _api_ok(message="Bridge paired", data=_bridge_response_paired(row))
+			if status == "Pairing":
+				expires = row.get("pairing_expires_at")
+				if expires and now_datetime() < frappe.utils.get_datetime(expires):
+					return _api_ok(message="Pairing pending", data=_bridge_response_pending(row))
+
+		# No usable row, or the existing pairing expired — mint a new one.
+		return _api_ok(message="New pairing created", data=_create_bridge_pairing_for_session())
 	except frappe.PermissionError as exc:
 		return _api_error("PERMISSION_DENIED", str(exc) or "Not permitted", 403)
 	except frappe.ValidationError as exc:
