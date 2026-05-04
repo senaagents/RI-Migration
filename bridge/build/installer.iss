@@ -28,7 +28,7 @@ DisableDirPage=yes
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesInstallIn64BitMode=x64
-OutputDir=..\..\..\..\dist-installer
+OutputDir=..\..\dist-installer
 OutputBaseFilename=SenaTallyBridge-Setup-{#MyAppVersion}
 SetupIconFile=
 Compression=lzma2
@@ -41,7 +41,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "..\..\..\..\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "register_task.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "unregister_task.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
