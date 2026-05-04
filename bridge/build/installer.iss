@@ -149,13 +149,16 @@ end;
 
 procedure WriteBridgeConfig();
 var
-  ConfigPath, Body, Server, Pairing, Host, Port, InstalledAt, CRLF: string;
+  ConfigPath, Body, Server, Pairing, Host, Port, InstalledAt, CRLF, AppDir: string;
 begin
-  ConfigPath := ExpandConstant('{app}\bridge-config.json');
+  AppDir := ExpandConstant('{app}');
+  // Defensive: at ssPostInstall the directory exists from the [Files] copy,
+  // but if the install has zero [Files] entries on a re-run path, create it.
+  ForceDirectories(AppDir);
+  ConfigPath := AppDir + '\bridge-config.json';
   Server := Trim(ConfigPage.Values[0]);
   Pairing := Trim(ConfigPage.Values[1]);
   Host := Trim(ConfigPage.Values[2]);
-  Pairing := Pairing;
   if Length(Host) = 0 then Host := 'localhost';
   Port := Trim(ConfigPage.Values[3]);
   if Length(Port) = 0 then Port := '9000';
@@ -179,7 +182,9 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  // Write config just before [Run] kicks off — directory exists by then.
-  if CurStep = ssInstall then
+  // ssPostInstall fires after [Files] copy, so {app}\ exists; ssInstall
+  // fires *before* file copy and the directory may not exist yet — that
+  // was the cause of "Failed to write bridge-config.json" on first install.
+  if CurStep = ssPostInstall then
     WriteBridgeConfig();
 end;
