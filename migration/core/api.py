@@ -3169,7 +3169,15 @@ def _run_tally_xml_parse_job(file_doc_name, owner_user, progress_id):
 
 _TALLY_BRIDGE_LABEL = "Tally bridge"
 _MANUAL_UPLOAD_LABEL = "Tally manual XML upload"
-_BRIDGE_PAIRED_STATUSES = ("Active", "Syncing", "Offline")
+_BRIDGE_PAIRED_STATUSES = ("Active", "Syncing")
+_BRIDGE_STALE_SECONDS = 150
+
+
+def _bridge_is_recent(last_seen_at):
+	if not last_seen_at:
+		return False
+	last_seen = frappe.utils.get_datetime(last_seen_at)
+	return (now_datetime() - last_seen).total_seconds() <= _BRIDGE_STALE_SECONDS
 
 
 def _bridge_response_paired(row):
@@ -3178,6 +3186,7 @@ def _bridge_response_paired(row):
 	last_heartbeat = row.get("last_seen_at")
 	return {
 		"paired": True,
+		"status": row.get("status") or "Active",
 		"last_heartbeat": str(last_heartbeat) if last_heartbeat else None,
 		"bridge_app_version": caps.get("bridge_version") or None,
 		"tally_version": row.get("tally_version") or None,
@@ -3192,6 +3201,7 @@ def _bridge_response_pending(row):
 	expires = row.get("pairing_expires_at")
 	return {
 		"paired": False,
+		"status": "Pairing",
 		"last_heartbeat": None,
 		"bridge_app_version": None,
 		"tally_version": None,
@@ -3206,6 +3216,7 @@ def _create_bridge_pairing_for_session():
 	pairing = create_integration_tally_pairing(connection_label=_TALLY_BRIDGE_LABEL)
 	return {
 		"paired": False,
+		"status": "Pairing",
 		"last_heartbeat": None,
 		"bridge_app_version": None,
 		"tally_version": None,
@@ -3221,7 +3232,8 @@ def get_bridge_status():
 
 	Three states this can resolve to:
 
-	  - **Paired**: most recent connection is in Active/Syncing/Offline.
+	  - **Paired**: most recent connection is in Active/Syncing with a
+	    recent heartbeat.
 	    Returns connection details + bridge_app_version. The desktop bridge
 	    has claimed and is heartbeating.
 	  - **Pending**: a Pairing-status connection exists and hasn't expired
@@ -3258,7 +3270,16 @@ def get_bridge_status():
 			row = rows[0]
 			status = row.get("status") or ""
 			if status in _BRIDGE_PAIRED_STATUSES and row.get("bridge_id"):
-				return _api_ok(message="Bridge paired", data=_bridge_response_paired(row))
+				if _bridge_is_recent(row.get("last_seen_at")):
+					return _api_ok(message="Bridge connected", data=_bridge_response_paired(row))
+				frappe.db.set_value(
+					INTEGRATION_CONNECTION_DOCTYPE,
+					row.get("name"),
+					"status",
+					"Offline",
+					update_modified=False,
+				)
+				frappe.db.commit()
 			if status == "Pairing":
 				expires = row.get("pairing_expires_at")
 				if expires and now_datetime() < frappe.utils.get_datetime(expires):

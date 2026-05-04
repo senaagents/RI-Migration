@@ -1338,7 +1338,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 	parser.add_argument("--pairing-code", help="Pairing code displayed in Migration")
 	parser.add_argument("--tally-host", default="localhost")
 	parser.add_argument("--tally-port", default=9000, type=int)
-	parser.add_argument("--tally-data-dir", default="", help="Optional TallyPrime Data directory for .1800 fast path")
+	parser.add_argument("--tally-data-dir", default="", help="TallyPrime company Data directory containing .1800 files")
 	parser.add_argument("--bridge-id", default="")
 	parser.add_argument("--timeout", default=120, type=int)
 	parser.add_argument("--once", action="store_true", help="Run one discovery sync and exit")

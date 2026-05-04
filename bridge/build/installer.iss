@@ -1,6 +1,6 @@
 ; Sena Tally Bridge — Inno Setup script.
 ;
-; Wizard collects: Sena server URL + pairing code, optional Tally host/port/data dir.
+; Wizard collects: Sena server URL, pairing code, Tally host/port, and Tally data folder.
 ; Writes %LOCALAPPDATA%\SenaTallyBridge\bridge-config.json from those inputs
 ; and registers a Scheduled Task at user logon that runs SenaTallyBridge.exe
 ; with --config pointing at that JSON.
@@ -89,12 +89,12 @@ begin
     wpSelectDir,
     'Sena Bridge configuration',
     'Tell the bridge how to reach Sena and Tally.',
-    'These values are saved to bridge-config.json and can be edited later by reinstalling.');
+    'To find the Tally company data folder, open TallyPrime on this Windows machine, then press Alt+Y (Data) > Configuration > Company Data Path. Paste that folder path here. These values are saved to bridge-config.json and can be edited later by reinstalling.');
   ConfigPage.Add('Sena server URL (e.g. https://app.senaagents.com)', False);
   ConfigPage.Add('Pairing code from the Sena migration page', False);
   ConfigPage.Add('Tally host (default: localhost)', False);
   ConfigPage.Add('Tally port (default: 9000)', False);
-  ConfigPage.Add('Tally data folder for .1800 fast path (optional)', False);
+  ConfigPage.Add('Tally company data folder from Alt+Y (Data) > Configuration > Company Data Path', False);
 
   // Pre-fill defaults
   ConfigPage.Values[2] := 'localhost';
@@ -103,13 +103,14 @@ end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
-  ServerUrl, PairingCode: string;
+  ServerUrl, PairingCode, DataDir: string;
 begin
   Result := True;
   if CurPageID = ConfigPage.ID then
   begin
     ServerUrl := Trim(ConfigPage.Values[0]);
     PairingCode := Trim(ConfigPage.Values[1]);
+    DataDir := Trim(ConfigPage.Values[4]);
     if (Length(ServerUrl) = 0) or (Length(PairingCode) = 0) then
     begin
       MsgBox('Server URL and pairing code are required.', mbError, MB_OK);
@@ -119,6 +120,18 @@ begin
     if (Pos('http://', LowerCase(ServerUrl)) <> 1) and (Pos('https://', LowerCase(ServerUrl)) <> 1) then
     begin
       MsgBox('Server URL must start with http:// or https://.', mbError, MB_OK);
+      Result := False;
+      exit;
+    end;
+    if Length(DataDir) = 0 then
+    begin
+      MsgBox('Tally company data folder is required. In TallyPrime, press Alt+Y (Data) > Configuration, copy Company Data Path, and paste it into this installer.', mbError, MB_OK);
+      Result := False;
+      exit;
+    end;
+    if not DirExists(DataDir) then
+    begin
+      MsgBox('Tally company data folder does not exist: ' + DataDir, mbError, MB_OK);
       Result := False;
       exit;
     end;
