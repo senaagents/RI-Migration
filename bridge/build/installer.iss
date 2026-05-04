@@ -129,26 +129,27 @@ var
   I: Integer;
   C: Char;
 begin
+  // ISPP (Inno Setup's preprocessor) sees `#` at column-0 as a directive
+  // prefix and chokes on `#8` / `#13` Pascal char literals before the
+  // Pascal compiler reads them. Use Chr(...) instead — semantically the
+  // same, but invisible to the preprocessor.
   Result := '';
   for I := 1 to Length(S) do
   begin
     C := S[I];
-    case C of
-      '"':  Result := Result + '\"';
-      '\':  Result := Result + '\\';
-      #8:   Result := Result + '\b';
-      #9:   Result := Result + '\t';
-      #10:  Result := Result + '\n';
-      #13:  Result := Result + '\r';
-    else
-      Result := Result + C;
-    end;
+    if C = '"' then Result := Result + '\"'
+    else if C = '\' then Result := Result + '\\'
+    else if C = Chr(8) then Result := Result + '\b'
+    else if C = Chr(9) then Result := Result + '\t'
+    else if C = Chr(10) then Result := Result + '\n'
+    else if C = Chr(13) then Result := Result + '\r'
+    else Result := Result + C;
   end;
 end;
 
 procedure WriteBridgeConfig();
 var
-  ConfigPath, Body, Server, Pairing, Host, Port, InstalledAt: string;
+  ConfigPath, Body, Server, Pairing, Host, Port, InstalledAt, CRLF: string;
 begin
   ConfigPath := ExpandConstant('{app}\bridge-config.json');
   Server := Trim(ConfigPage.Values[0]);
@@ -160,15 +161,17 @@ begin
   if Length(Port) = 0 then Port := '9000';
   InstalledAt := GetDateTimeString('yyyy-mm-dd"T"hh:nn:ss', '-', ':');
 
+  // CRLF — Chr(13)+Chr(10) instead of #13#10 (see comment on JsonEscape).
+  CRLF := Chr(13) + Chr(10);
   Body :=
-    '{' + #13#10 +
-    '  "server": "' + JsonEscape(Server) + '",' + #13#10 +
-    '  "pairing_code": "' + JsonEscape(Pairing) + '",' + #13#10 +
-    '  "tally_host": "' + JsonEscape(Host) + '",' + #13#10 +
-    '  "tally_port": ' + Port + ',' + #13#10 +
-    '  "installed_at": "' + InstalledAt + '",' + #13#10 +
-    '  "version": "{#MyAppVersion}"' + #13#10 +
-    '}' + #13#10;
+    '{' + CRLF +
+    '  "server": "' + JsonEscape(Server) + '",' + CRLF +
+    '  "pairing_code": "' + JsonEscape(Pairing) + '",' + CRLF +
+    '  "tally_host": "' + JsonEscape(Host) + '",' + CRLF +
+    '  "tally_port": ' + Port + ',' + CRLF +
+    '  "installed_at": "' + InstalledAt + '",' + CRLF +
+    '  "version": "{#MyAppVersion}"' + CRLF +
+    '}' + CRLF;
 
   if not SaveStringToFile(ConfigPath, Body, False) then
     RaiseException('Failed to write ' + ConfigPath);
