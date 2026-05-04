@@ -18,6 +18,8 @@ from frappe.utils.background_jobs import enqueue, is_job_enqueued
 logger = logging.getLogger(__name__)
 
 _CACHE_KEY = "migration_progress"
+_BRIDGE_COMMAND_CACHE_PREFIX = "migration_bridge_command"
+_BRIDGE_COMMAND_RESULT_CACHE_PREFIX = "migration_bridge_command_result"
 
 INTEGRATION_CONNECTION_DOCTYPE = "Integration Source Connection"
 INTEGRATION_SOURCE_TYPE_DOCTYPE = "Integration Source Type"
@@ -128,6 +130,14 @@ def _hash_text(value):
 	if not isinstance(value, str):
 		value = _json_dumps(value)
 	return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _bridge_command_key(connection_id):
+	return f"{_BRIDGE_COMMAND_CACHE_PREFIX}:{connection_id}"
+
+
+def _bridge_command_result_key(command_id):
+	return f"{_BRIDGE_COMMAND_RESULT_CACHE_PREFIX}:{command_id}"
 
 
 def _get_password(doc, fieldname):
@@ -1586,7 +1596,35 @@ def bridge_heartbeat(connection_id=None, bridge_token=None, status="Active", tal
 	doc.save(ignore_permissions=True)
 	frappe.db.commit()
 
-	return {"ok": True, "connection_id": doc.name, "status": doc.status}
+	command = frappe.cache.get_value(_bridge_command_key(doc.name))
+	return {"ok": True, "connection_id": doc.name, "status": doc.status, "command": command}
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def ack_bridge_command(connection_id=None, bridge_token=None, command_id=None, status="Success", result_json=None, error=None):
+	"""Bridge acknowledgement for an async command returned by heartbeat."""
+	doc = _verify_bridge(connection_id, bridge_token)
+	if not command_id:
+		frappe.throw("command_id is required")
+	active = frappe.cache.get_value(_bridge_command_key(doc.name)) or {}
+	if active.get("id") == command_id:
+		frappe.cache.delete_value(_bridge_command_key(doc.name))
+	result = _parse_json(result_json, default={}) or {}
+	payload = {
+		"command_id": command_id,
+		"connection_id": doc.name,
+		"status": status or "Success",
+		"result": result,
+		"error": error or "",
+		"updated_at": str(now_datetime()),
+	}
+	frappe.cache.set_value(_bridge_command_result_key(command_id), payload, expires_in_sec=60 * 60 * 6)
+	if error:
+		doc.last_error = error
+	doc.last_seen_at = now_datetime()
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return {"ok": True, "command": payload}
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -3234,6 +3272,166 @@ def get_bridge_status():
 		return _api_error("VALIDATION_ERROR", str(exc) or "Invalid request", 400)
 	except Exception as exc:
 		logger.exception("get_bridge_status failed")
+		return _api_error("INTERNAL_ERROR", f"{type(exc).__name__}: {exc}", 500)
+
+
+def _latest_bridge_connection_for_user(connection_id=None):
+	_require_integration_user()
+	if connection_id:
+		doc = frappe.get_doc(INTEGRATION_CONNECTION_DOCTYPE, connection_id)
+		_assert_can_manage_integration_connection(doc)
+		return doc
+	rows = frappe.get_all(
+		INTEGRATION_CONNECTION_DOCTYPE,
+		filters={
+			"owner_user": frappe.session.user,
+			"source_type": ("in", _BRIDGE_SOURCE_TYPES),
+			"connection_label": ("!=", _MANUAL_UPLOAD_LABEL),
+			"status": ("in", _BRIDGE_PAIRED_STATUSES),
+		},
+		fields=["name"],
+		order_by="modified desc",
+		limit_page_length=1,
+	)
+	if not rows:
+		frappe.throw("No paired bridge connection found")
+	return frappe.get_doc(INTEGRATION_CONNECTION_DOCTYPE, rows[0].name)
+
+
+def _queue_bridge_command(connection_id, command_type, **params):
+	command_id = frappe.generate_hash(length=12)
+	command = {
+		"id": command_id,
+		"type": command_type,
+		"params": params,
+		"created_at": str(now_datetime()),
+		**params,
+	}
+	frappe.cache.set_value(_bridge_command_key(connection_id), command, expires_in_sec=60 * 60)
+	return command
+
+
+@frappe.whitelist()
+def request_tally_1800_company_discovery(connection_id=None):
+	"""Ask the paired bridge to scan local Tally data folders for .1800 companies."""
+	try:
+		doc = _latest_bridge_connection_for_user(connection_id)
+		command = _queue_bridge_command(doc.name, "discover_1800_companies")
+		return _api_ok("Discovery queued", {"command_id": command["id"], "connection_id": doc.name})
+	except frappe.PermissionError as exc:
+		return _api_error("PERMISSION_DENIED", str(exc) or "Not permitted", 403)
+	except frappe.ValidationError as exc:
+		return _api_error("VALIDATION_ERROR", str(exc) or "Invalid request", 400)
+	except Exception as exc:
+		logger.exception("request_tally_1800_company_discovery failed")
+		return _api_error("INTERNAL_ERROR", f"{type(exc).__name__}: {exc}", 500)
+
+
+@frappe.whitelist()
+def request_tally_1800_extraction(connection_id=None, company_id=None):
+	"""Ask the paired bridge to run the local .1800 decoder for one company."""
+	try:
+		if not company_id:
+			return _api_error("VALIDATION_ERROR", "company_id is required", 400)
+		doc = _latest_bridge_connection_for_user(connection_id)
+		command = _queue_bridge_command(doc.name, "extract_1800_company", company_id=company_id)
+		return _api_ok("Extraction queued", {"command_id": command["id"], "connection_id": doc.name})
+	except frappe.PermissionError as exc:
+		return _api_error("PERMISSION_DENIED", str(exc) or "Not permitted", 403)
+	except frappe.ValidationError as exc:
+		return _api_error("VALIDATION_ERROR", str(exc) or "Invalid request", 400)
+	except Exception as exc:
+		logger.exception("request_tally_1800_extraction failed")
+		return _api_error("INTERNAL_ERROR", f"{type(exc).__name__}: {exc}", 500)
+
+
+@frappe.whitelist()
+def get_bridge_command_status(command_id=None):
+	"""Return the last bridge command acknowledgement, if the bridge has sent one."""
+	try:
+		_require_integration_user()
+		if not command_id:
+			return _api_error("VALIDATION_ERROR", "command_id is required", 400)
+		result = frappe.cache.get_value(_bridge_command_result_key(command_id))
+		if not result:
+			return _api_ok("Command pending", {"status": "Pending", "command_id": command_id})
+		connection_id = result.get("connection_id")
+		if connection_id:
+			_get_readable_integration_connection(connection_id)
+		return _api_ok("Command status", result)
+	except frappe.PermissionError as exc:
+		return _api_error("PERMISSION_DENIED", str(exc) or "Not permitted", 403)
+	except Exception as exc:
+		logger.exception("get_bridge_command_status failed")
+		return _api_error("INTERNAL_ERROR", f"{type(exc).__name__}: {exc}", 500)
+
+
+@frappe.whitelist()
+def list_tally_1800_companies(connection_id=None):
+	"""List local .1800 companies discovered by the bridge."""
+	try:
+		doc = _latest_bridge_connection_for_user(connection_id)
+		rows = frappe.get_all(
+			INTEGRATION_NORMALIZED_RECORD_DOCTYPE,
+			filters={"connection": doc.name, "record_type": "Tally 1800 Company"},
+			fields=["name", "source_id", "record_name", "normalized_json", "last_seen_at"],
+			order_by="record_name asc",
+			limit_page_length=200,
+		)
+		companies = []
+		for row in rows:
+			payload = _safe_json_object(row.get("normalized_json"))
+			companies.append({
+				"id": row.source_id,
+				"name": row.record_name or payload.get("company_name") or row.source_id,
+				"last_seen_at": str(row.last_seen_at) if row.last_seen_at else None,
+				**payload,
+			})
+		return _api_ok("Companies fetched", {"connection_id": doc.name, "companies": companies})
+	except frappe.PermissionError as exc:
+		return _api_error("PERMISSION_DENIED", str(exc) or "Not permitted", 403)
+	except frappe.ValidationError as exc:
+		return _api_error("VALIDATION_ERROR", str(exc) or "Invalid request", 400)
+	except Exception as exc:
+		logger.exception("list_tally_1800_companies failed")
+		return _api_error("INTERNAL_ERROR", f"{type(exc).__name__}: {exc}", 500)
+
+
+@frappe.whitelist()
+def get_tally_1800_company_details(connection_id=None, company_id=None):
+	"""Return latest discovered company info and latest decode summary for one .1800 company."""
+	try:
+		if not company_id:
+			return _api_error("VALIDATION_ERROR", "company_id is required", 400)
+		doc = _latest_bridge_connection_for_user(connection_id)
+		company_rows = frappe.get_all(
+			INTEGRATION_NORMALIZED_RECORD_DOCTYPE,
+			filters={"connection": doc.name, "record_type": "Tally 1800 Company", "source_id": company_id},
+			fields=["record_name", "normalized_json", "last_seen_at"],
+			limit_page_length=1,
+		)
+		company = {}
+		if company_rows:
+			company = _safe_json_object(company_rows[0].normalized_json)
+			company["name"] = company_rows[0].record_name or company.get("company_name")
+			company["last_seen_at"] = str(company_rows[0].last_seen_at) if company_rows[0].last_seen_at else None
+		summaries = frappe.get_all(
+			INTEGRATION_NORMALIZED_RECORD_DOCTYPE,
+			filters={
+				"connection": doc.name,
+				"record_type": "Tally 1800 Decode Summary",
+				"source_id": ("like", f"{company_id}:%"),
+			},
+			fields=["record_name", "normalized_json", "last_seen_at"],
+			order_by="last_seen_at desc",
+			limit_page_length=1,
+		)
+		summary = _safe_json_object(summaries[0].normalized_json) if summaries else {}
+		return _api_ok("Company details fetched", {"connection_id": doc.name, "company": company, "summary": summary})
+	except frappe.PermissionError as exc:
+		return _api_error("PERMISSION_DENIED", str(exc) or "Not permitted", 403)
+	except Exception as exc:
+		logger.exception("get_tally_1800_company_details failed")
 		return _api_error("INTERNAL_ERROR", f"{type(exc).__name__}: {exc}", 500)
 
 

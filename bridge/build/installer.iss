@@ -1,6 +1,6 @@
 ; Sena Tally Bridge — Inno Setup script.
 ;
-; Wizard collects: Sena server URL + pairing code, optional Tally host/port.
+; Wizard collects: Sena server URL + pairing code, optional Tally host/port/data dir.
 ; Writes %LOCALAPPDATA%\SenaTallyBridge\bridge-config.json from those inputs
 ; and registers a Scheduled Task at user logon that runs SenaTallyBridge.exe
 ; with --config pointing at that JSON.
@@ -94,6 +94,7 @@ begin
   ConfigPage.Add('Pairing code from the Sena migration page', False);
   ConfigPage.Add('Tally host (default: localhost)', False);
   ConfigPage.Add('Tally port (default: 9000)', False);
+  ConfigPage.Add('Tally data folder for .1800 fast path (optional)', False);
 
   // Pre-fill defaults
   ConfigPage.Values[2] := 'localhost';
@@ -149,7 +150,7 @@ end;
 
 procedure WriteBridgeConfig();
 var
-  ConfigPath, Body, Server, Pairing, Host, Port, InstalledAt, CRLF, AppDir: string;
+  ConfigPath, Body, Server, Pairing, Host, Port, DataDir, InstalledAt, CRLF, AppDir: string;
 begin
   AppDir := ExpandConstant('{app}');
   // Defensive: at ssPostInstall the directory exists from the [Files] copy,
@@ -162,6 +163,7 @@ begin
   if Length(Host) = 0 then Host := 'localhost';
   Port := Trim(ConfigPage.Values[3]);
   if Length(Port) = 0 then Port := '9000';
+  DataDir := Trim(ConfigPage.Values[4]);
   InstalledAt := GetDateTimeString('yyyy-mm-dd"T"hh:nn:ss', '-', ':');
 
   // CRLF — Chr(13)+Chr(10) instead of #13#10 (see comment on JsonEscape).
@@ -172,6 +174,7 @@ begin
     '  "pairing_code": "' + JsonEscape(Pairing) + '",' + CRLF +
     '  "tally_host": "' + JsonEscape(Host) + '",' + CRLF +
     '  "tally_port": ' + Port + ',' + CRLF +
+    '  "tally_data_dir": "' + JsonEscape(DataDir) + '",' + CRLF +
     '  "installed_at": "' + InstalledAt + '",' + CRLF +
     '  "version": "{#MyAppVersion}"' + CRLF +
     '}' + CRLF;

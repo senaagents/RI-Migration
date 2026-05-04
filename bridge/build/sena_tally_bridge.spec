@@ -15,10 +15,10 @@ block_cipher = None
 
 a = Analysis(
     ['../sena_tally_bridge.py'],
-    pathex=[],
+    pathex=['../../tally_1800/codex'],
     binaries=[],
     datas=[],
-    hiddenimports=[],
+    hiddenimports=['tally1800', 'tally1800.decoded_export', 'tally1800.probe'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -20,6 +20,7 @@ from html import escape
 import json
 import os
 import re
+import sqlite3
 import sys
 import time
 import urllib.error
@@ -28,6 +29,8 @@ import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from hashlib import sha256
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Iterable
 
 
@@ -47,6 +50,14 @@ if getattr(sys, "frozen", False):
 DEFAULT_METHOD_PREFIX = "migration.core.api"
 INVALID_XML_CHARS = re.compile(r"&#(?:[0-8]|1[0-1]|1[4-9]|2[0-9]|3[01]);")
 MINIMAL_COLLECTION_FIELDS = ["Name", "Guid", "Parent", "AlterId", "MasterId"]
+BRIDGE_CAPABILITIES = {
+	"bridge_version": __version__,
+	"protocols": ["tally_http_xml", "tally_1800_decode"],
+	"streams": [],
+}
+DECODER_ROOT = Path(__file__).resolve().parents[1] / "tally_1800" / "codex"
+if DECODER_ROOT.exists() and str(DECODER_ROOT) not in sys.path:
+	sys.path.insert(0, str(DECODER_ROOT))
 
 TALLY_STREAMS = [
 	{
@@ -225,6 +236,26 @@ TALLY_STREAMS = [
 		"requires_company": True,
 	},
 ]
+BRIDGE_CAPABILITIES["streams"] = ["Company", *[stream["object_type"] for stream in TALLY_STREAMS]]
+
+DECODE_TABLES = [
+	("companies", "Tally 1800 Company Profile", ("company_id", "name", "company_guid")),
+	("groups", "Tally 1800 Group", ("master_id", "name", "guid")),
+	("ledgers", "Tally 1800 Ledger", ("master_id", "name", "guid")),
+	("stock_items", "Tally 1800 Stock Item", ("master_id", "name", "guid")),
+	("units", "Tally 1800 Unit", ("master_id", "name", "guid")),
+	("godowns", "Tally 1800 Godown", ("master_id", "name", "guid")),
+	("cost_centres", "Tally 1800 Cost Centre", ("master_id", "name", "guid")),
+	("voucher_types", "Tally 1800 Voucher Type", ("master_id", "name", "guid")),
+	("production_voucher_headers_1800", "Tally 1800 Voucher Header", ("voucher_master_id", "voucher_number_guess", "voucher_date_guess")),
+	("production_ledger_entries_1800", "Tally 1800 Ledger Entry", ("voucher_master_id", "entry_id", "ledger_master_id")),
+	("production_inventory_entries_1800", "Tally 1800 Inventory Entry", ("voucher_master_id", "entry_id", "stock_item_master_id")),
+	("production_xml_repair_queue_1800", "Tally 1800 XML Repair Queue", ("voucher_master_id", "voucher_type_name")),
+	("production_review_queue_1800", "Tally 1800 Review Queue", ("voucher_master_id", "voucher_type_name")),
+]
+
+DISCOVERY_OBJECT_TYPE = "Tally 1800 Company"
+SUMMARY_OBJECT_TYPE = "Tally 1800 Decode Summary"
 
 
 @dataclass
@@ -233,7 +264,11 @@ class BridgeConfig:
 	pairing_code: str
 	tally_host: str = "localhost"
 	tally_port: int = 9000
+	tally_data_dir: str = ""
 	bridge_id: str = ""
+	connection_id: str = ""
+	bridge_token: str = ""
+	config_path: str = ""
 	timeout: int = 120
 	once: bool = False
 
@@ -447,6 +482,184 @@ def first_nonempty(*values) -> str:
 
 def compact_json(value: dict) -> str:
 	return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def save_config_value(config_path: str, key: str, value: str) -> None:
+	if not config_path:
+		return
+	path = Path(config_path)
+	try:
+		data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+	except Exception:
+		data = {}
+	data[key] = value
+	path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def discover_tally_data_roots(config: BridgeConfig) -> list[Path]:
+	candidates = []
+	configured = getattr(config, "tally_data_dir", "") or ""
+	if configured:
+		candidates.append(Path(configured))
+	for env_name in ("TALLY_DATA_DIR", "TALLYPRIME_DATA"):
+		if os.environ.get(env_name):
+			candidates.append(Path(os.environ[env_name]))
+	local = os.environ.get("LOCALAPPDATA")
+	roaming = os.environ.get("APPDATA")
+	userprofile = os.environ.get("USERPROFILE")
+	if local:
+		candidates.extend([
+			Path(local) / "TallyPrime" / "Data",
+			Path(local) / "Tally" / "Data",
+		])
+	if roaming:
+		candidates.extend([
+			Path(roaming) / "TallyPrime" / "Data",
+			Path(roaming) / "Tally" / "Data",
+		])
+	if userprofile:
+		candidates.extend([
+			Path(userprofile) / "Documents" / "TallyPrime" / "Data",
+			Path(userprofile) / "Documents" / "Tally" / "Data",
+		])
+
+	seen = set()
+	roots = []
+	for candidate in candidates:
+		try:
+			resolved = candidate.expanduser().resolve()
+		except Exception:
+			continue
+		if resolved in seen or not resolved.exists() or not resolved.is_dir():
+			continue
+		seen.add(resolved)
+		roots.append(resolved)
+	return roots
+
+
+def quick_company_name(company_dir: Path) -> str:
+	try:
+		from tally1800.probe import extract_tagged_field_strings
+	except Exception:
+		return company_dir.name
+	company_file = company_dir / "Company.1800"
+	if not company_file.exists():
+		return company_dir.name
+	try:
+		hits = extract_tagged_field_strings(company_file, min_chars=1)
+	except Exception:
+		return company_dir.name
+	for hit in hits:
+		text = (hit.text or "").strip()
+		if text:
+			return text
+	return company_dir.name
+
+
+def discover_1800_companies(config: BridgeConfig) -> list[dict]:
+	companies = []
+	for root in discover_tally_data_roots(config):
+		for child in sorted(root.iterdir()):
+			if not child.is_dir():
+				continue
+			files = list(child.glob("*.1800"))
+			if not files:
+				continue
+			size = sum(path.stat().st_size for path in files if path.exists())
+			companies.append({
+				"company_id": child.name,
+				"company_name": quick_company_name(child),
+				"folder": str(child),
+				"root": str(root),
+				"file_count": len(files),
+				"total_bytes": size,
+				"has_company": (child / "Company.1800").exists(),
+				"has_manager": (child / "Manager.1800").exists(),
+				"has_tranmgr": (child / "TranMgr.1800").exists(),
+			})
+	return companies
+
+
+def discovery_objects(companies: list[dict]) -> list[dict]:
+	objects = []
+	for company in companies:
+		source_id = company.get("company_id") or sha256(compact_json(company).encode("utf-8")).hexdigest()[:16]
+		objects.append(build_ingest_object(
+			DISCOVERY_OBJECT_TYPE,
+			source_id,
+			company.get("company_name") or source_id,
+			compact_json(company),
+			{"source_type": "Tally", "object_type": DISCOVERY_OBJECT_TYPE, **company},
+			payload_format="json",
+		))
+	return objects
+
+
+def sqlite_row_dicts(db_path: Path, table: str) -> list[dict]:
+	with sqlite3.connect(db_path) as conn:
+		conn.row_factory = sqlite3.Row
+		try:
+			rows = conn.execute(f"select * from {table}").fetchall()
+		except sqlite3.Error:
+			return []
+		return [dict(row) for row in rows]
+
+
+def decoded_table_counts(db_path: Path) -> dict:
+	counts = {}
+	with sqlite3.connect(db_path) as conn:
+		for table, _, _ in DECODE_TABLES:
+			try:
+				counts[table] = int(conn.execute(f"select count(*) from {table}").fetchone()[0])
+			except sqlite3.Error:
+				counts[table] = 0
+	return counts
+
+
+def decoded_row_source_id(table: str, row: dict, keys: tuple[str, ...], index: int) -> str:
+	parts = [str(row.get(key) or "").strip() for key in keys]
+	parts = [part for part in parts if part]
+	if parts:
+		return f"{table}:{':'.join(parts)}"
+	return f"{table}:{index}"
+
+
+def decoded_rows_to_objects(company: dict, db_path: Path, summary: dict) -> Iterable[list[dict]]:
+	yield [build_ingest_object(
+		SUMMARY_OBJECT_TYPE,
+		f"{company['company_id']}:{summary['decode_id']}",
+		company.get("company_name") or company["company_id"],
+		compact_json(summary),
+		{"source_type": "Tally", "object_type": SUMMARY_OBJECT_TYPE, **summary},
+		payload_format="json",
+	)]
+	for table, object_type, keys in DECODE_TABLES:
+		batch = []
+		for index, row in enumerate(sqlite_row_dicts(db_path, table), 1):
+			normalized = {
+				"source_type": "Tally",
+				"object_type": object_type,
+				"company_id": company["company_id"],
+				"company_name": company.get("company_name"),
+				"decoder_table": table,
+				"decoder_version": "tally1800-local",
+				"record": row,
+			}
+			source_id = decoded_row_source_id(table, row, keys, index)
+			name = row.get("name") or row.get("voucher_number_guess") or row.get("voucher_type_name") or source_id
+			batch.append(build_ingest_object(
+				object_type,
+				source_id,
+				str(name),
+				compact_json(row),
+				normalized,
+				payload_format="json",
+			))
+			if len(batch) >= 200:
+				yield batch
+				batch = []
+		if batch:
+			yield batch
 
 
 def build_report_xml(
@@ -828,6 +1041,8 @@ def max_alter_id(items: Iterable[dict]) -> str:
 
 
 def claim_pairing(config: BridgeConfig) -> dict:
+	if config.connection_id and config.bridge_token:
+		return {"connection_id": config.connection_id, "bridge_token": config.bridge_token, "status": "Active"}
 	return post_json(
 		config.server,
 		"claim_integration_bridge_pairing",
@@ -836,13 +1051,7 @@ def claim_pairing(config: BridgeConfig) -> dict:
 			"bridge_id": config.bridge_id or f"sena-tally-{uuid.uuid4().hex[:10]}",
 			"host": config.tally_host,
 			"port": config.tally_port,
-			"capabilities_json": json.dumps(
-				{
-					"bridge_version": __version__,
-					"protocols": ["tally_http_xml"],
-					"streams": ["Company", *[stream["object_type"] for stream in TALLY_STREAMS]],
-				}
-			),
+			"capabilities_json": json.dumps(BRIDGE_CAPABILITIES),
 		},
 		config.timeout,
 	)
@@ -895,6 +1104,91 @@ def ingest_objects(config: BridgeConfig, connection_id: str, bridge_token: str, 
 		},
 		config.timeout,
 	)
+
+
+def ack_bridge_command(config: BridgeConfig, connection_id: str, bridge_token: str, command_id: str, status: str, result: dict | None = None, error: str = "") -> dict:
+	return post_json(
+		config.server,
+		"ack_bridge_command",
+		{
+			"connection_id": connection_id,
+			"bridge_token": bridge_token,
+			"command_id": command_id,
+			"status": status,
+			"result_json": json.dumps(result or {}),
+			"error": error,
+		},
+		config.timeout,
+	)
+
+
+def handle_bridge_command(config: BridgeConfig, connection_id: str, bridge_token: str, command: dict | None) -> None:
+	if not command:
+		return
+	if isinstance(command, str):
+		try:
+			command = json.loads(command)
+		except json.JSONDecodeError:
+			return
+	command_id = command.get("id") or ""
+	command_type = command.get("type") or ""
+	try:
+		if command_type == "discover_1800_companies":
+			log("Discovering local Tally .1800 companies...")
+			companies = discover_1800_companies(config)
+			if companies:
+				ingest_objects(config, connection_id, bridge_token, discovery_objects(companies))
+			ack_bridge_command(config, connection_id, bridge_token, command_id, "Success", {"companies": len(companies)})
+			log(f"Discovered {len(companies)} local Tally companies.")
+			return
+		if command_type == "extract_1800_company":
+			company_id = str(command.get("company_id") or "").strip()
+			run_1800_extract(config, connection_id, bridge_token, command_id, company_id)
+			return
+		ack_bridge_command(config, connection_id, bridge_token, command_id, "Error", error=f"Unknown command type: {command_type}")
+	except Exception as exc:
+		log(f"Command {command_type or command_id} failed: {exc}")
+		if command_id:
+			try:
+				ack_bridge_command(config, connection_id, bridge_token, command_id, "Error", error=str(exc))
+			except Exception:
+				pass
+
+
+def run_1800_extract(config: BridgeConfig, connection_id: str, bridge_token: str, command_id: str, company_id: str) -> None:
+	try:
+		from tally1800.decoded_export import export_decoded_sqlite
+	except Exception as exc:
+		raise RuntimeError(f"tally1800 decoder is not available in this bridge build: {exc}") from exc
+	companies = discover_1800_companies(config)
+	company = next((item for item in companies if str(item.get("company_id")) == company_id), None)
+	if not company:
+		raise RuntimeError(f"Company folder {company_id!r} was not found")
+	source_dir = Path(company["folder"])
+	log(f"Running .1800 decode for {company.get('company_name') or company_id}...")
+	heartbeat(config, connection_id, bridge_token, status="Syncing", last_error=f"1800 decode started for {company_id}")
+	with TemporaryDirectory(prefix="sena-tally-1800-") as tmp:
+		out_path = Path(tmp) / f"{company_id}_decoded.sqlite3"
+		export_decoded_sqlite(source_dir, out_path)
+		counts = decoded_table_counts(out_path)
+		summary = {
+			"decode_id": uuid.uuid4().hex[:12],
+			"company_id": company_id,
+			"company_name": company.get("company_name"),
+			"folder": company.get("folder"),
+			"counts": counts,
+			"sqlite_size": out_path.stat().st_size,
+			"decoded_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+		}
+		total = 0
+		for batch in decoded_rows_to_objects(company, out_path, summary):
+			ingest_objects(config, connection_id, bridge_token, batch)
+			total += len(batch)
+			if total % 2000 == 0:
+				log(f"Uploaded {total} decoded rows...")
+		ack_bridge_command(config, connection_id, bridge_token, command_id, "Success", {"summary": summary, "uploaded_objects": total})
+	heartbeat(config, connection_id, bridge_token, status="Active", last_error="")
+	log(f".1800 decode uploaded {total} objects.")
 
 
 def sync_stream(config: BridgeConfig, connection_id: str, bridge_token: str, stream: dict, company_name: str = "") -> int:
@@ -954,6 +1248,12 @@ def run_once(config: BridgeConfig) -> dict:
 	claim = claim_pairing(config)
 	connection_id = claim["connection_id"]
 	bridge_token = claim["bridge_token"]
+	if not config.connection_id:
+		config.connection_id = connection_id
+		save_config_value(config.config_path, "connection_id", connection_id)
+	if not config.bridge_token:
+		config.bridge_token = bridge_token
+		save_config_value(config.config_path, "bridge_token", bridge_token)
 	log(f"Paired with Sena connection {connection_id}.")
 
 	failures = {}
@@ -967,20 +1267,15 @@ def run_once(config: BridgeConfig) -> dict:
 		log(f"Could not read Tally company name: {exc}")
 
 	log("Sending bridge heartbeat...")
-	heartbeat(
+	heartbeat_result = heartbeat(
 		config,
 		connection_id,
 		bridge_token,
 		status="Syncing",
 		tally_company_name=company_name,
-		capabilities_json=json.dumps(
-			{
-				"bridge_version": __version__,
-				"protocols": ["tally_http_xml"],
-				"streams": ["Company", *[stream["object_type"] for stream in TALLY_STREAMS]],
-			}
-		),
+		capabilities_json=json.dumps(BRIDGE_CAPABILITIES),
 	)
+	handle_bridge_command(config, connection_id, bridge_token, heartbeat_result.get("command"))
 
 	counts = {}
 	for stream in TALLY_STREAMS:
@@ -996,13 +1291,14 @@ def run_once(config: BridgeConfig) -> dict:
 			log(f"Skipped {stream_name}: {exc}")
 
 	log("Marking connection active...")
-	heartbeat(
+	heartbeat_result = heartbeat(
 		config,
 		connection_id,
 		bridge_token,
 		status="Active",
 		last_error=json.dumps(failures) if failures else "",
 	)
+	handle_bridge_command(config, connection_id, bridge_token, heartbeat_result.get("command"))
 	log("Discovery finished.")
 	return {"connection_id": connection_id, "company": company_name, "counts": counts, "failures": failures}
 
@@ -1042,6 +1338,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 	parser.add_argument("--pairing-code", help="Pairing code displayed in Migration")
 	parser.add_argument("--tally-host", default="localhost")
 	parser.add_argument("--tally-port", default=9000, type=int)
+	parser.add_argument("--tally-data-dir", default="", help="Optional TallyPrime Data directory for .1800 fast path")
 	parser.add_argument("--bridge-id", default="")
 	parser.add_argument("--timeout", default=120, type=int)
 	parser.add_argument("--once", action="store_true", help="Run one discovery sync and exit")
@@ -1095,7 +1392,11 @@ def main(argv: list[str] | None = None) -> int:
 		pairing_code=pairing_code,
 		tally_host=cfg.get("tally_host") or args.tally_host,
 		tally_port=int(cfg.get("tally_port") or args.tally_port),
+		tally_data_dir=cfg.get("tally_data_dir") or args.tally_data_dir,
 		bridge_id=cfg.get("bridge_id") or args.bridge_id,
+		connection_id=cfg.get("connection_id") or "",
+		bridge_token=cfg.get("bridge_token") or "",
+		config_path=args.config or "",
 		timeout=int(cfg.get("timeout") or args.timeout),
 		once=args.once,
 	)
