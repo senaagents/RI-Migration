@@ -34,7 +34,7 @@ from tempfile import TemporaryDirectory
 from typing import Iterable
 
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 
 # PyInstaller's `--windowed` / `console=False` exe runs without an attached
 # console: `sys.stdout` exists but every write to it raises
