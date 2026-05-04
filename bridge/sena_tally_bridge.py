@@ -34,7 +34,7 @@ from tempfile import TemporaryDirectory
 from typing import Iterable
 
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 # PyInstaller's `--windowed` / `console=False` exe runs without an attached
 # console: `sys.stdout` exists but every write to it raises
@@ -668,8 +668,80 @@ def quick_company_name(company_dir: Path) -> str:
 	return inline or company_dir.name
 
 
+def _count_collection_rows(config: BridgeConfig, stream: dict, sv_company: str) -> int | None:
+	try:
+		xml_text = fetch_collection_xml(config, stream, {"SVCURRENTCOMPANY": sv_company})
+	except Exception as exc:
+		log(f"  baseline {stream['object_type']} count failed: {exc}")
+		return None
+	try:
+		root = ET.fromstring(clean_xml(xml_text))
+	except ET.ParseError:
+		return None
+	return sum(1 for _ in root.iter(stream["tag_name"]))
+
+
+def fetch_company_baseline(config: BridgeConfig, company_name: str) -> dict:
+	"""Reconciliation baseline — pulls cheap totals from Tally HTTP/XML for the
+	loaded company. Returns whichever fields succeeded; missing keys mean
+	Tally was unreachable or didn't recognise the company. Used during scan
+	so each company card carries a "Tally said this many" baseline that the
+	post-extraction silver counts can be diffed against.
+	"""
+	if not company_name:
+		return {}
+	out: dict = {}
+
+	ledger_stream = next((s for s in TALLY_STREAMS if s["object_type"] == "Ledger"), None)
+	if ledger_stream:
+		count = _count_collection_rows(config, ledger_stream, company_name)
+		if count is not None:
+			out["baseline_ledger_count"] = count
+
+	stock_stream = next((s for s in TALLY_STREAMS if s["object_type"] == "Stock Item"), None)
+	if stock_stream:
+		count = _count_collection_rows(config, stock_stream, company_name)
+		if count is not None:
+			out["baseline_stock_item_count"] = count
+
+	# Trial Balance — sum of closing debits and credits across all accounts.
+	try:
+		tb_xml = post_tally_xml_with_retries(
+			config,
+			build_report_xml("Trial Balance", {"SVCURRENTCOMPANY": company_name}, explode=True),
+			attempts=1,
+		)
+		tb_rows = parse_trial_balance_rows(tb_xml)
+		out["baseline_tb_debit"] = sum(row.get("debit") or 0.0 for row in tb_rows)
+		out["baseline_tb_credit"] = sum(row.get("credit") or 0.0 for row in tb_rows)
+	except Exception as exc:
+		log(f"  baseline Trial Balance failed: {exc}")
+
+	# Stock Summary — sum qty + closing value across all stock items.
+	try:
+		ss_xml = post_tally_xml_with_retries(
+			config,
+			build_report_xml("Stock Summary", {"SVCURRENTCOMPANY": company_name}),
+			attempts=1,
+		)
+		ss_rows = parse_stock_summary_rows(ss_xml)
+		out["baseline_stock_qty_total"] = sum(row.get("qty") or 0.0 for row in ss_rows)
+		out["baseline_stock_value_total"] = sum(row.get("value") or 0.0 for row in ss_rows)
+	except Exception as exc:
+		log(f"  baseline Stock Summary failed: {exc}")
+
+	return out
+
+
 def discover_1800_companies(config: BridgeConfig) -> list[dict]:
 	companies = []
+	# Resolve the company currently loaded in Tally so we know which discovered
+	# folder, if any, should be enriched with reconciliation baseline metrics.
+	# Companies on disk that aren't loaded in Tally get the file metadata only.
+	try:
+		loaded_company = get_company_name(config)
+	except Exception:
+		loaded_company = ""
 	for root in discover_tally_data_roots(config):
 		for child in sorted(root.iterdir()):
 			if not child.is_dir():
@@ -678,7 +750,7 @@ def discover_1800_companies(config: BridgeConfig) -> list[dict]:
 			if not files:
 				continue
 			size = sum(path.stat().st_size for path in files if path.exists())
-			companies.append({
+			company = {
 				"company_id": child.name,
 				"company_name": quick_company_name(child),
 				"folder": str(child),
@@ -688,7 +760,13 @@ def discover_1800_companies(config: BridgeConfig) -> list[dict]:
 				"has_company": (child / "Company.1800").exists(),
 				"has_manager": (child / "Manager.1800").exists(),
 				"has_tranmgr": (child / "TranMgr.1800").exists(),
-			})
+			}
+			# Baseline only meaningful for the loaded Tally company — querying
+			# others returns empty data and burns scan time.
+			if loaded_company and company["company_name"] == loaded_company:
+				log(f"Fetching reconciliation baseline for {loaded_company}...")
+				company.update(fetch_company_baseline(config, loaded_company))
+			companies.append(company)
 	return companies
 
 
