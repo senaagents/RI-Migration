@@ -34,7 +34,7 @@ from tempfile import TemporaryDirectory
 from typing import Iterable
 
 
-__version__ = "0.2.0"
+__version__ = "0.2.2"
 
 # PyInstaller's `--windowed` / `console=False` exe runs without an attached
 # console: `sys.stdout` exists but every write to it raises
@@ -612,23 +612,60 @@ def discover_tally_data_roots(config: BridgeConfig) -> list[Path]:
 	return roots
 
 
-def quick_company_name(company_dir: Path) -> str:
+# Tally Prime stores text fields as UTF-16-LE inside .1800 files. Pattern
+# matches runs of (printable ASCII char, 0x00) repeated — that's how display
+# names, addresses, and GSTINs are encoded.
+_COMPANY_NAME_UTF16_RE = re.compile(rb"(?:[\x20-\x7e]\x00){8,}")
+
+
+def _inline_company_name_from_1800(company_file: Path) -> str:
+	"""Fallback name extractor: scan the first 64 KiB of Company.1800 for the
+	first UTF-16-LE string that looks like a company name. Tally writes the
+	company display name near the start of the file with a length prefix
+	byte that decodes as a stray leading char. We strip non-letter prefix
+	bytes and pick the first candidate with sufficient alpha content.
+	Used when tally1800.probe is unavailable (frozen exe missing imports).
+	"""
 	try:
-		from tally1800.probe import extract_tagged_field_strings
-	except Exception:
-		return company_dir.name
+		with company_file.open("rb") as fh:
+			head = fh.read(65536)
+	except OSError:
+		return ""
+	for match in _COMPANY_NAME_UTF16_RE.finditer(head):
+		text = match.group(0).decode("utf-16-le", errors="ignore").strip()
+		# Tally precedes UTF-16 strings with a length byte that decodes as a
+		# stray leading char (e.g. 'X' for a 88-byte / 44-char string).
+		# Drop the first decoded char unconditionally.
+		text = text[1:].strip()
+		if len(text) < 4:
+			continue
+		alpha = sum(1 for c in text if c.isalpha())
+		if alpha < 3:
+			continue
+		# Reject obvious non-name strings: file paths, emails, all-digit IDs.
+		lowered = text.lower()
+		if "\\" in text or "/" in text or "@" in text or "tallyprime" in lowered:
+			continue
+		return text
+	return ""
+
+
+def quick_company_name(company_dir: Path) -> str:
 	company_file = company_dir / "Company.1800"
 	if not company_file.exists():
 		return company_dir.name
 	try:
+		from tally1800.probe import extract_tagged_field_strings
 		hits = extract_tagged_field_strings(company_file, min_chars=1)
+		for hit in hits:
+			text = (hit.text or "").strip()
+			if text:
+				return text
 	except Exception:
-		return company_dir.name
-	for hit in hits:
-		text = (hit.text or "").strip()
-		if text:
-			return text
-	return company_dir.name
+		# tally1800 not bundled or probe failed — fall back to inline scan.
+		pass
+	inline = _inline_company_name_from_1800(company_file)
+	return inline or company_dir.name
 
 
 def discover_1800_companies(config: BridgeConfig) -> list[dict]:
@@ -1142,6 +1179,24 @@ def heartbeat(config: BridgeConfig, connection_id: str, bridge_token: str, **upd
 	return post_json(config.server, "bridge_heartbeat", payload, config.timeout)
 
 
+def poll_command(config: BridgeConfig, connection_id: str, bridge_token: str) -> dict | None:
+	"""Cheap command-only poll. Returns the queued command (if any) without
+	updating last_seen_at or capabilities. Called between streams so user-
+	triggered commands feel responsive even when a sync cycle takes minutes.
+	"""
+	try:
+		result = post_json(
+			config.server,
+			"poll_bridge_command",
+			{"connection_id": connection_id, "bridge_token": bridge_token},
+			timeout=10,
+		)
+	except Exception as exc:
+		log(f"Command poll failed (non-fatal): {exc}")
+		return None
+	return result.get("command")
+
+
 def update_checkpoint(
 	config: BridgeConfig,
 	connection_id: str,
@@ -1341,7 +1396,22 @@ def run_once(config: BridgeConfig) -> dict:
 		save_config_value(config.config_path, "bridge_token", bridge_token)
 	log(f"Paired with Sena connection {connection_id}.")
 
+	# Heartbeat FIRST (without Tally) so any pending command — set_data_dir,
+	# discover_1800_companies — is picked up immediately. Probing Tally for
+	# the company name takes up to 2 min if Tally is unresponsive, and we
+	# don't want a stuck Tally probe to block file-based commands that
+	# don't need Tally at all.
 	failures = {}
+	log("Sending initial bridge heartbeat...")
+	heartbeat_result = heartbeat(
+		config,
+		connection_id,
+		bridge_token,
+		status="Syncing",
+		capabilities_json=json.dumps(build_capabilities(config)),
+	)
+	handle_bridge_command(config, connection_id, bridge_token, heartbeat_result.get("command"))
+
 	try:
 		log(f"Checking Tally at {config.tally_host}:{config.tally_port}...")
 		company_name = get_company_name(config)
@@ -1351,19 +1421,14 @@ def run_once(config: BridgeConfig) -> dict:
 		failures["Company"] = str(exc)
 		log(f"Could not read Tally company name: {exc}")
 
-	log("Sending bridge heartbeat...")
-	heartbeat_result = heartbeat(
-		config,
-		connection_id,
-		bridge_token,
-		status="Syncing",
-		tally_company_name=company_name,
-		capabilities_json=json.dumps(build_capabilities(config)),
-	)
-	handle_bridge_command(config, connection_id, bridge_token, heartbeat_result.get("command"))
-
 	counts = {}
 	for stream in TALLY_STREAMS:
+		# Check for queued commands between streams. A user clicking
+		# "Scan companies" mid-sync should see results within seconds, not
+		# wait 30+ minutes for the cycle to finish.
+		pending = poll_command(config, connection_id, bridge_token)
+		if pending:
+			handle_bridge_command(config, connection_id, bridge_token, pending)
 		stream_name = stream["object_type"]
 		try:
 			log(f"Starting {stream_name}...")

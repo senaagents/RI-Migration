@@ -1601,6 +1601,17 @@ def bridge_heartbeat(connection_id=None, bridge_token=None, status="Active", tal
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
+def poll_bridge_command(connection_id=None, bridge_token=None):
+	"""Cheap command-only poll for the bridge. Returns the queued command
+	if any without touching last_seen_at or capabilities. Used between
+	streams so user-triggered commands don't wait for the next heartbeat.
+	"""
+	doc = _verify_bridge(connection_id, bridge_token)
+	command = frappe.cache.get_value(_bridge_command_key(doc.name))
+	return {"ok": True, "command": command}
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
 def ack_bridge_command(connection_id=None, bridge_token=None, command_id=None, status="Success", result_json=None, error=None):
 	"""Bridge acknowledgement for an async command returned by heartbeat."""
 	doc = _verify_bridge(connection_id, bridge_token)
