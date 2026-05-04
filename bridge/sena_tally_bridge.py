@@ -34,7 +34,7 @@ from tempfile import TemporaryDirectory
 from typing import Iterable
 
 
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 
 # PyInstaller's `--windowed` / `console=False` exe runs without an attached
 # console: `sys.stdout` exists but every write to it raises
@@ -1485,38 +1485,57 @@ def run_once(config: BridgeConfig) -> dict:
 		config,
 		connection_id,
 		bridge_token,
-		status="Syncing",
+		status="Active",
 		capabilities_json=json.dumps(build_capabilities(config)),
 	)
 	handle_bridge_command(config, connection_id, bridge_token, heartbeat_result.get("command"))
 
-	try:
-		log(f"Checking Tally at {config.tally_host}:{config.tally_port}...")
-		company_name = get_company_name(config)
-		log(f"Tally company detected: {company_name or '(blank)'}")
-	except Exception as exc:
-		company_name = ""
-		failures["Company"] = str(exc)
-		log(f"Could not read Tally company name: {exc}")
-
+	# Live HTTP/XML stream sync is intentionally disabled. The bridge used to
+	# pull all 18 TALLY_STREAMS every cycle to ingest into Integration Source
+	# Object — a Phase 1 design that's been superseded by the .1800 file-based
+	# decode. Streams overlap with that decode, take 5-30+ min per cycle, block
+	# user-triggered commands inside in-flight HTTP requests, and depend on
+	# Tally being responsive (which is fragile). Set this back to True and
+	# uncomment the loop below if you need the per-stream HTTP ingestion back.
+	LIVE_HTTP_SYNC_ENABLED = False
+	company_name = ""
 	counts = {}
-	for stream in TALLY_STREAMS:
-		# Check for queued commands between streams. A user clicking
-		# "Scan companies" mid-sync should see results within seconds, not
-		# wait 30+ minutes for the cycle to finish.
-		pending = poll_command(config, connection_id, bridge_token)
-		if pending:
-			handle_bridge_command(config, connection_id, bridge_token, pending)
-		stream_name = stream["object_type"]
+
+	if LIVE_HTTP_SYNC_ENABLED:
 		try:
-			log(f"Starting {stream_name}...")
-			count = sync_stream(config, connection_id, bridge_token, stream, company_name)
-			counts[stream_name] = count
-			log(f"Finished {stream_name}: {count} records.")
+			log(f"Checking Tally at {config.tally_host}:{config.tally_port}...")
+			company_name = get_company_name(config)
+			log(f"Tally company detected: {company_name or '(blank)'}")
 		except Exception as exc:
-			counts[stream_name] = 0
-			failures[stream_name] = str(exc)
-			log(f"Skipped {stream_name}: {exc}")
+			failures["Company"] = str(exc)
+			log(f"Could not read Tally company name: {exc}")
+
+		for stream in TALLY_STREAMS:
+			# Check for queued commands between streams.
+			pending = poll_command(config, connection_id, bridge_token)
+			if pending:
+				handle_bridge_command(config, connection_id, bridge_token, pending)
+			stream_name = stream["object_type"]
+			try:
+				log(f"Starting {stream_name}...")
+				count = sync_stream(config, connection_id, bridge_token, stream, company_name)
+				counts[stream_name] = count
+				log(f"Finished {stream_name}: {count} records.")
+			except Exception as exc:
+				counts[stream_name] = 0
+				failures[stream_name] = str(exc)
+				log(f"Skipped {stream_name}: {exc}")
+	else:
+		# Idle-poll for user-triggered commands (set_data_dir, scan, extract).
+		# Keeps the bridge responsive without the live HTTP work. 50s of polling
+		# at 3s intervals matches the outer 60s sleep for a continuous loop.
+		log("Live HTTP stream sync disabled — idle-polling for commands.")
+		deadline = time.time() + 50
+		while time.time() < deadline:
+			pending = poll_command(config, connection_id, bridge_token)
+			if pending:
+				handle_bridge_command(config, connection_id, bridge_token, pending)
+			time.sleep(3)
 
 	log("Marking connection active...")
 	heartbeat_result = heartbeat(
