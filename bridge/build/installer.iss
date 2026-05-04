@@ -1,6 +1,9 @@
 ; Sena Tally Bridge — Inno Setup script.
 ;
-; Wizard collects: Sena server URL, pairing code, Tally host/port, and Tally data folder.
+; Wizard collects: Sena server URL, pairing code, Tally host/port.
+; The Tally data folder is auto-discovered by the bridge from tally.ini and
+; standard Windows locations; if discovery fails the user can paste a custom
+; folder from the Sena migration page after pairing.
 ; Writes %LOCALAPPDATA%\SenaTallyBridge\bridge-config.json from those inputs
 ; and registers a Scheduled Task at user logon that runs SenaTallyBridge.exe
 ; with --config pointing at that JSON.
@@ -12,7 +15,7 @@
 ; uncomment SignTool below + add the corresponding Inno Setup signtool entry.
 
 #define MyAppName        "Sena Tally Bridge"
-#define MyAppVersion     "0.1.0"
+#define MyAppVersion     "0.2.0"
 #define MyAppPublisher   "Sena"
 #define MyAppExeName     "SenaTallyBridge.exe"
 #define MyAppTaskName    "SenaTallyBridge"
@@ -89,12 +92,11 @@ begin
     wpSelectDir,
     'Sena Bridge configuration',
     'Tell the bridge how to reach Sena and Tally.',
-    'To find the Tally company data folder, open TallyPrime on this Windows machine, then press Alt+Y (Data) > Configuration > Company Data Path. Paste that folder path here. These values are saved to bridge-config.json and can be edited later by reinstalling.');
+    'The bridge auto-discovers your Tally company data folder. If it cannot find your companies, set a custom folder path from the Sena migration page after pairing.');
   ConfigPage.Add('Sena server URL (e.g. https://app.senaagents.com)', False);
   ConfigPage.Add('Pairing code from the Sena migration page', False);
   ConfigPage.Add('Tally host (default: localhost)', False);
   ConfigPage.Add('Tally port (default: 9000)', False);
-  ConfigPage.Add('Tally company data folder from Alt+Y (Data) > Configuration > Company Data Path', False);
 
   // Pre-fill defaults
   ConfigPage.Values[2] := 'localhost';
@@ -103,14 +105,13 @@ end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
-  ServerUrl, PairingCode, DataDir: string;
+  ServerUrl, PairingCode: string;
 begin
   Result := True;
   if CurPageID = ConfigPage.ID then
   begin
     ServerUrl := Trim(ConfigPage.Values[0]);
     PairingCode := Trim(ConfigPage.Values[1]);
-    DataDir := Trim(ConfigPage.Values[4]);
     if (Length(ServerUrl) = 0) or (Length(PairingCode) = 0) then
     begin
       MsgBox('Server URL and pairing code are required.', mbError, MB_OK);
@@ -120,18 +121,6 @@ begin
     if (Pos('http://', LowerCase(ServerUrl)) <> 1) and (Pos('https://', LowerCase(ServerUrl)) <> 1) then
     begin
       MsgBox('Server URL must start with http:// or https://.', mbError, MB_OK);
-      Result := False;
-      exit;
-    end;
-    if Length(DataDir) = 0 then
-    begin
-      MsgBox('Tally company data folder is required. In TallyPrime, press Alt+Y (Data) > Configuration, copy Company Data Path, and paste it into this installer.', mbError, MB_OK);
-      Result := False;
-      exit;
-    end;
-    if not DirExists(DataDir) then
-    begin
-      MsgBox('Tally company data folder does not exist: ' + DataDir, mbError, MB_OK);
       Result := False;
       exit;
     end;
@@ -163,7 +152,7 @@ end;
 
 procedure WriteBridgeConfig();
 var
-  ConfigPath, Body, Server, Pairing, Host, Port, DataDir, InstalledAt, CRLF, AppDir: string;
+  ConfigPath, Body, Server, Pairing, Host, Port, InstalledAt, CRLF, AppDir: string;
 begin
   AppDir := ExpandConstant('{app}');
   // Defensive: at ssPostInstall the directory exists from the [Files] copy,
@@ -176,10 +165,11 @@ begin
   if Length(Host) = 0 then Host := 'localhost';
   Port := Trim(ConfigPage.Values[3]);
   if Length(Port) = 0 then Port := '9000';
-  DataDir := Trim(ConfigPage.Values[4]);
   InstalledAt := GetDateTimeString('yyyy-mm-dd"T"hh:nn:ss', '-', ':');
 
   // CRLF — Chr(13)+Chr(10) instead of #13#10 (see comment on JsonEscape).
+  // tally_data_dir is intentionally omitted at install time — the bridge
+  // auto-discovers it, and the Sena UI can write a custom path post-pair.
   CRLF := Chr(13) + Chr(10);
   Body :=
     '{' + CRLF +
@@ -187,7 +177,6 @@ begin
     '  "pairing_code": "' + JsonEscape(Pairing) + '",' + CRLF +
     '  "tally_host": "' + JsonEscape(Host) + '",' + CRLF +
     '  "tally_port": ' + Port + ',' + CRLF +
-    '  "tally_data_dir": "' + JsonEscape(DataDir) + '",' + CRLF +
     '  "installed_at": "' + InstalledAt + '",' + CRLF +
     '  "version": "{#MyAppVersion}"' + CRLF +
     '}' + CRLF;

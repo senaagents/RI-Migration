@@ -34,7 +34,7 @@ from tempfile import TemporaryDirectory
 from typing import Iterable
 
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # PyInstaller's `--windowed` / `console=False` exe runs without an attached
 # console: `sys.stdout` exists but every write to it raises
@@ -237,6 +237,21 @@ TALLY_STREAMS = [
 	},
 ]
 BRIDGE_CAPABILITIES["streams"] = ["Company", *[stream["object_type"] for stream in TALLY_STREAMS]]
+
+
+def build_capabilities(config: "BridgeConfig | None" = None) -> dict:
+	# Augment the static capability set with the bridge's current view of the
+	# Tally data folders. The server stores this on the connection so the UI
+	# can show "we are scanning these folders" without a round-trip.
+	caps = dict(BRIDGE_CAPABILITIES)
+	if config is not None:
+		caps["configured_data_dir"] = getattr(config, "tally_data_dir", "") or ""
+		try:
+			caps["discovered_roots"] = [str(p) for p in discover_tally_data_roots(config)]
+		except Exception:
+			# Discovery hits the filesystem; never let it crash a heartbeat.
+			caps["discovered_roots"] = []
+	return caps
 
 DECODE_TABLES = [
 	("companies", "Tally 1800 Company Profile", ("company_id", "name", "company_guid")),
@@ -496,6 +511,62 @@ def save_config_value(config_path: str, key: str, value: str) -> None:
 	path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def persist_data_dir(config: "BridgeConfig", new_dir: str) -> None:
+	# Update both the in-memory config and bridge-config.json so the next
+	# heartbeat reports the new path and a future bridge restart picks it up.
+	config.tally_data_dir = new_dir
+	if config.config_path:
+		save_config_value(config.config_path, "tally_data_dir", new_dir)
+
+
+def tally_ini_locations() -> list[Path]:
+	# Tally Prime drops tally.ini in a few standard places. Order matters —
+	# Public is the modern default, the other two are legacy / per-user
+	# overrides we still want to read.
+	candidates: list[Path] = []
+	for env_name in ("PUBLIC", "ALLUSERSPROFILE"):
+		base = os.environ.get(env_name)
+		if base:
+			candidates.append(Path(base) / "TallyPrime" / "tally.ini")
+			candidates.append(Path(base) / "Tally.ERP9" / "tally.ini")
+	for env_name in ("LOCALAPPDATA", "APPDATA"):
+		base = os.environ.get(env_name)
+		if base:
+			candidates.append(Path(base) / "TallyPrime" / "tally.ini")
+	# Common install locations as last-resort.
+	for drive in ("C:", "D:"):
+		candidates.extend([
+			Path(f"{drive}\\Program Files\\TallyPrime\\tally.ini"),
+			Path(f"{drive}\\Program Files (x86)\\TallyPrime\\tally.ini"),
+		])
+	return candidates
+
+
+def parse_tally_ini_data_paths(ini_path: Path) -> list[Path]:
+	# tally.ini lines look like `Data Path = C:\path\to\data` (case and
+	# whitespace vary). It may have multiple Data entries; collect them all.
+	# Tally writes the file as cp1252 in older builds and utf-8 in newer ones,
+	# so try utf-8 first then fall back.
+	if not ini_path.exists() or not ini_path.is_file():
+		return []
+	text: str | None = None
+	for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+		try:
+			text = ini_path.read_text(encoding=encoding)
+			break
+		except (UnicodeDecodeError, OSError):
+			continue
+	if text is None:
+		return []
+	paths: list[Path] = []
+	pattern = re.compile(r"^\s*data\s*path\s*=\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+	for match in pattern.finditer(text):
+		raw = match.group(1).strip().strip('"').strip("'")
+		if raw:
+			paths.append(Path(raw))
+	return paths
+
+
 def discover_tally_data_roots(config: BridgeConfig) -> list[Path]:
 	candidates = []
 	configured = getattr(config, "tally_data_dir", "") or ""
@@ -504,6 +575,8 @@ def discover_tally_data_roots(config: BridgeConfig) -> list[Path]:
 	for env_name in ("TALLY_DATA_DIR", "TALLYPRIME_DATA"):
 		if os.environ.get(env_name):
 			candidates.append(Path(os.environ[env_name]))
+	for ini_path in tally_ini_locations():
+		candidates.extend(parse_tally_ini_data_paths(ini_path))
 	local = os.environ.get("LOCALAPPDATA")
 	roaming = os.environ.get("APPDATA")
 	userprofile = os.environ.get("USERPROFILE")
@@ -1051,7 +1124,7 @@ def claim_pairing(config: BridgeConfig) -> dict:
 			"bridge_id": config.bridge_id or f"sena-tally-{uuid.uuid4().hex[:10]}",
 			"host": config.tally_host,
 			"port": config.tally_port,
-			"capabilities_json": json.dumps(BRIDGE_CAPABILITIES),
+			"capabilities_json": json.dumps(build_capabilities(config)),
 		},
 		config.timeout,
 	)
@@ -1144,6 +1217,16 @@ def handle_bridge_command(config: BridgeConfig, connection_id: str, bridge_token
 		if command_type == "extract_1800_company":
 			company_id = str(command.get("company_id") or "").strip()
 			run_1800_extract(config, connection_id, bridge_token, command_id, company_id)
+			return
+		if command_type == "set_data_dir":
+			new_dir = str(command.get("data_dir") or "").strip()
+			persist_data_dir(config, new_dir)
+			roots = [str(p) for p in discover_tally_data_roots(config)]
+			ack_bridge_command(
+				config, connection_id, bridge_token, command_id, "Success",
+				{"configured_data_dir": config.tally_data_dir, "discovered_roots": roots},
+			)
+			log(f"Updated tally_data_dir to {config.tally_data_dir!r} ({len(roots)} root(s) now visible)")
 			return
 		ack_bridge_command(config, connection_id, bridge_token, command_id, "Error", error=f"Unknown command type: {command_type}")
 	except Exception as exc:
@@ -1273,7 +1356,7 @@ def run_once(config: BridgeConfig) -> dict:
 		bridge_token,
 		status="Syncing",
 		tally_company_name=company_name,
-		capabilities_json=json.dumps(BRIDGE_CAPABILITIES),
+		capabilities_json=json.dumps(build_capabilities(config)),
 	)
 	handle_bridge_command(config, connection_id, bridge_token, heartbeat_result.get("command"))
 

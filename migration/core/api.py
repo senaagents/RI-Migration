@@ -3184,6 +3184,9 @@ def _bridge_response_paired(row):
 	"""Build the get_bridge_status payload for a paired connection row."""
 	caps = _parse_json(row.get("capabilities_json"), default={}) or {}
 	last_heartbeat = row.get("last_seen_at")
+	discovered_roots = caps.get("discovered_roots") or []
+	if not isinstance(discovered_roots, list):
+		discovered_roots = []
 	return {
 		"paired": True,
 		"status": row.get("status") or "Active",
@@ -3193,6 +3196,8 @@ def _bridge_response_paired(row):
 		"connection_id": row.get("name"),
 		"pairing_code": None,
 		"pairing_expires_at": None,
+		"configured_data_dir": caps.get("configured_data_dir") or "",
+		"discovered_roots": [str(p) for p in discovered_roots],
 	}
 
 
@@ -3337,6 +3342,29 @@ def _queue_bridge_command(connection_id, command_type, **params):
 	}
 	frappe.cache.set_value(_bridge_command_key(connection_id), command, expires_in_sec=60 * 60)
 	return command
+
+
+@frappe.whitelist()
+def set_bridge_data_dir(connection_id=None, data_dir=None):
+	"""Push a custom Tally data folder path to the paired bridge.
+
+	The bridge persists it to bridge-config.json on next heartbeat ack and
+	uses it as the primary discovery root. Pass an empty string to clear.
+	"""
+	try:
+		if data_dir is None:
+			return _api_error("VALIDATION_ERROR", "data_dir is required", 400)
+		path = str(data_dir).strip()
+		doc = _latest_bridge_connection_for_user(connection_id)
+		command = _queue_bridge_command(doc.name, "set_data_dir", data_dir=path)
+		return _api_ok("Data folder update queued", {"command_id": command["id"], "connection_id": doc.name})
+	except frappe.PermissionError as exc:
+		return _api_error("PERMISSION_DENIED", str(exc) or "Not permitted", 403)
+	except frappe.ValidationError as exc:
+		return _api_error("VALIDATION_ERROR", str(exc) or "Invalid request", 400)
+	except Exception as exc:
+		logger.exception("set_bridge_data_dir failed")
+		return _api_error("INTERNAL_ERROR", f"{type(exc).__name__}: {exc}", 500)
 
 
 @frappe.whitelist()
