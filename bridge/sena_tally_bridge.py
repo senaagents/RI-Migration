@@ -30,6 +30,8 @@ from hashlib import sha256
 from typing import Iterable
 
 
+__version__ = "0.1.0"
+
 DEFAULT_METHOD_PREFIX = "migration.core.api"
 INVALID_XML_CHARS = re.compile(r"&#(?:[0-8]|1[0-1]|1[4-9]|2[0-9]|3[01]);")
 MINIMAL_COLLECTION_FIELDS = ["Name", "Guid", "Parent", "AlterId", "MasterId"]
@@ -824,7 +826,7 @@ def claim_pairing(config: BridgeConfig) -> dict:
 			"port": config.tally_port,
 			"capabilities_json": json.dumps(
 				{
-					"bridge_version": "0.1.0",
+					"bridge_version": __version__,
 					"protocols": ["tally_http_xml"],
 					"streams": ["Company", *[stream["object_type"] for stream in TALLY_STREAMS]],
 				}
@@ -961,7 +963,7 @@ def run_once(config: BridgeConfig) -> dict:
 		tally_company_name=company_name,
 		capabilities_json=json.dumps(
 			{
-				"bridge_version": "0.1.0",
+				"bridge_version": __version__,
 				"protocols": ["tally_http_xml"],
 				"streams": ["Company", *[stream["object_type"] for stream in TALLY_STREAMS]],
 			}
@@ -1022,6 +1024,7 @@ def self_test() -> int:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
 	parser = argparse.ArgumentParser(description="Sena Tally Bridge for Migration")
+	parser.add_argument("--config", help="Path to bridge-config.json — overrides individual flags")
 	parser.add_argument("--server", help="Sena/Frappe server base URL, for example http://localhost:8001")
 	parser.add_argument("--pairing-code", help="Pairing code displayed in Migration")
 	parser.add_argument("--tally-host", default="localhost")
@@ -1030,23 +1033,45 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 	parser.add_argument("--timeout", default=120, type=int)
 	parser.add_argument("--once", action="store_true", help="Run one discovery sync and exit")
 	parser.add_argument("--self-test", action="store_true", help="Run parser/envelope self-test without network")
+	parser.add_argument("--version", action="version", version=f"sena-tally-bridge {__version__}")
 	return parser.parse_args(argv)
+
+
+def _load_config_file(path: str) -> dict:
+	"""Read bridge-config.json written by the Inno Setup wizard.
+
+	The installer drops this file in `%LOCALAPPDATA%\\SenaTallyBridge\\` with
+	the server URL + pairing code captured from the wizard. Letting the
+	scheduled task point at the file (rather than embedding flags in the
+	task command) means the user can re-pair by editing the JSON without
+	reinstalling.
+	"""
+	with open(path, "r", encoding="utf-8") as fh:
+		return json.load(fh)
 
 
 def main(argv: list[str] | None = None) -> int:
 	args = parse_args(argv or sys.argv[1:])
 	if args.self_test:
 		return self_test()
-	if not args.server or not args.pairing_code:
-		raise SystemExit("--server and --pairing-code are required unless --self-test is used")
+
+	# Config file beats individual flags. CLI flags fill in anything the
+	# JSON omits, so existing PowerShell installs that pass --server etc.
+	# still work for the deprecation window.
+	cfg = _load_config_file(args.config) if args.config else {}
+
+	server = cfg.get("server") or args.server
+	pairing_code = cfg.get("pairing_code") or args.pairing_code
+	if not server or not pairing_code:
+		raise SystemExit("server + pairing_code are required (via --config or --server/--pairing-code)")
 
 	config = BridgeConfig(
-		server=args.server,
-		pairing_code=args.pairing_code,
-		tally_host=args.tally_host,
-		tally_port=args.tally_port,
-		bridge_id=args.bridge_id,
-		timeout=args.timeout,
+		server=server,
+		pairing_code=pairing_code,
+		tally_host=cfg.get("tally_host") or args.tally_host,
+		tally_port=int(cfg.get("tally_port") or args.tally_port),
+		bridge_id=cfg.get("bridge_id") or args.bridge_id,
+		timeout=int(cfg.get("timeout") or args.timeout),
 		once=args.once,
 	)
 

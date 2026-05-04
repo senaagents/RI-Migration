@@ -2980,3 +2980,288 @@ def import_ledger_opening_balances(host="localhost", port=9000, company_name="",
 		for e in summary["details"]["errors"][:10]:
 			print(f"  Error: {e}")
 	return summary
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 — manual XML upload + bridge status (Tally Prime masters)
+# ---------------------------------------------------------------------------
+
+def _api_ok(message, data=None):
+	"""Sena envelope success shape: ``{ok, message, data}``.
+
+	Mirrors `senaagents_backend.senaagents_backend.api.response.api_ok` —
+	we don't import it cross-app to keep migration's dependency graph
+	self-contained, but the wire shape is identical.
+	"""
+	payload = {"ok": True, "message": message}
+	if data is not None:
+		payload["data"] = data
+	return payload
+
+
+def _api_error(code, message, status_code=500):
+	"""Sena envelope error shape: ``{ok: false, error: {code, message}}``."""
+	frappe.local.response.http_status_code = status_code
+	return {"ok": False, "error": {"code": code, "message": message}}
+
+
+_BRIDGE_SOURCE_TYPES = ("Tally",)
+
+
+_TALLY_XML_MAX_BYTES = 250 * 1024 * 1024
+
+
+@frappe.whitelist(methods=["POST"])
+def start_tally_parse(file_url=""):
+	"""Enqueue parsing of a previously-uploaded Tally Prime XML file.
+
+	The client first uploads the XML through Frappe's chunked
+	`/api/method/upload_file` endpoint (private, owned by the caller),
+	then hands the resulting ``file_url`` here. We resolve the matching
+	`File` doctype owned by the session user, validate, and enqueue a
+	background job on the `long` queue. Returns ``{progress_id}`` for
+	polling via :func:`get_migration_status` and the ``migration_progress``
+	realtime event.
+	"""
+	try:
+		_require_integration_user()
+		if not file_url:
+			return _api_error("VALIDATION_ERROR", "Missing 'file_url'", 400)
+
+		# Constitution R7.3: never trust a raw client path. Resolve through
+		# the File doctype scoped to the session user — non-owners get an
+		# empty result here and a clean NOT_FOUND.
+		matches = frappe.get_all(
+			"File",
+			filters={"file_url": file_url, "owner": frappe.session.user},
+			fields=["name", "file_name", "file_size", "is_private"],
+			limit=1,
+		)
+		if not matches:
+			return _api_error("NOT_FOUND", "File not found", 404)
+		file_row = matches[0]
+
+		file_name = (file_row.get("file_name") or "").lower()
+		if not file_name.endswith(".xml"):
+			return _api_error(
+				"VALIDATION_ERROR",
+				"Only .xml exports from Tally Prime are accepted",
+				400,
+			)
+
+		file_size = int(file_row.get("file_size") or 0)
+		if file_size > _TALLY_XML_MAX_BYTES:
+			return _api_error(
+				"VALIDATION_ERROR",
+				f"File exceeds {_TALLY_XML_MAX_BYTES // (1024 * 1024)} MB cap",
+				400,
+			)
+
+		progress_id = f"tally_xml_{frappe.generate_hash(length=8)}"
+		_set_progress(progress_id, status="queued", step="Queued", progress=0)
+
+		frappe.enqueue(
+			"migration.core.api._run_tally_xml_parse_job",
+			queue="long",
+			timeout=600,
+			enqueue_after_commit=True,
+			file_doc_name=file_row["name"],
+			owner_user=frappe.session.user,
+			progress_id=progress_id,
+		)
+		return _api_ok(message="Parse queued", data={"progress_id": progress_id})
+	except frappe.PermissionError as exc:
+		return _api_error("PERMISSION_DENIED", str(exc) or "Not permitted", 403)
+	except frappe.ValidationError as exc:
+		return _api_error("VALIDATION_ERROR", str(exc) or "Invalid request", 400)
+	except Exception as exc:
+		logger.exception("start_tally_parse failed")
+		return _api_error("INTERNAL_ERROR", f"{type(exc).__name__}: {exc}", 500)
+
+
+def _run_tally_xml_parse_job(file_doc_name, owner_user, progress_id):
+	"""Background worker: parse a previously-uploaded Tally XML File doc.
+
+	Called via :func:`frappe.enqueue` from :func:`start_tally_parse`. Reads
+	the file from disk, runs the existing :func:`process_upload` upserter,
+	and reports progress through :func:`_set_progress` (Redis cache +
+	`migration_progress` realtime event). The temp File doc is deleted on
+	success so the user's private files folder stays clean. On failure the
+	File doc is left in place so the user can retry without re-uploading.
+	"""
+	from migration.core.services.manual_upload import process_upload
+
+	try:
+		_set_progress(progress_id, status="running", step="Reading file", progress=5)
+		file_doc = frappe.get_doc("File", file_doc_name)
+		file_path = file_doc.get_full_path()
+		with open(file_path, "rb") as fh:
+			xml_bytes = fh.read()
+
+		_set_progress(progress_id, status="running", step="Parsing", progress=20)
+		result = process_upload(owner_user, xml_bytes)
+
+		# Best-effort cleanup — the File doc has done its job. If delete
+		# fails (rare), the parse result still wins; the user just sees a
+		# stale entry under Home/Attachments.
+		try:
+			frappe.delete_doc("File", file_doc_name, ignore_permissions=True)
+		except Exception:
+			logger.warning("Failed to delete temp File %s after parse", file_doc_name)
+
+		_set_progress(
+			progress_id,
+			status="completed",
+			step="Done",
+			progress=100,
+			summary=result,
+		)
+		frappe.db.commit()
+	except Exception as exc:
+		logger.exception("_run_tally_xml_parse_job failed")
+		_set_progress(
+			progress_id,
+			status="failed",
+			step="Error",
+			progress=0,
+			errors=[f"{type(exc).__name__}: {exc}"],
+		)
+		raise
+
+
+@frappe.whitelist()
+def get_bridge_status():
+	"""Return the most recent bridge pairing/heartbeat state for this user.
+
+	Read-only — surfaces what the existing pairing + heartbeat machinery
+	already records on `Integration Source Connection`. No state changes.
+	"""
+	try:
+		_require_integration_user()
+
+		# Bridge connections are Tally connections that were claimed by a
+		# desktop bridge — those rows always have a bridge_id set. Manual
+		# XML uploads use the same source_type but never get a bridge_id,
+		# so we filter them out here to avoid reporting a "paired" status
+		# that the bridge never actually established.
+		rows = frappe.get_all(
+			INTEGRATION_CONNECTION_DOCTYPE,
+			filters={
+				"owner_user": frappe.session.user,
+				"source_type": ("in", _BRIDGE_SOURCE_TYPES),
+				"bridge_id": ("is", "set"),
+			},
+			fields=[
+				"name", "status", "last_seen_at", "tally_version",
+				"capabilities_json", "bridge_id", "modified",
+			],
+			order_by="modified desc",
+			limit_page_length=1,
+		)
+
+		if not rows:
+			data = {
+				"paired": False,
+				"last_heartbeat": None,
+				"bridge_app_version": None,
+				"tally_version": None,
+				"connection_id": None,
+			}
+		else:
+			row = rows[0]
+			paired = (row.get("status") or "") in ("Active", "Syncing", "Offline")
+			last_heartbeat = row.get("last_seen_at")
+			# Bridge app version lives inside capabilities_json under
+			# `bridge_version`. The doctype's `tally_version` column is
+			# Tally Prime's version (different thing). Older code conflated
+			# these — surface them as separate fields now.
+			caps = _parse_json(row.get("capabilities_json"), default={}) or {}
+			data = {
+				"paired": bool(paired),
+				"last_heartbeat": str(last_heartbeat) if last_heartbeat else None,
+				"bridge_app_version": caps.get("bridge_version") or None,
+				"tally_version": row.get("tally_version") or None,
+				"connection_id": row.get("name"),
+			}
+		return _api_ok(message="Bridge status fetched", data=data)
+	except frappe.PermissionError as exc:
+		return _api_error("PERMISSION_DENIED", str(exc) or "Not permitted", 403)
+	except frappe.ValidationError as exc:
+		return _api_error("VALIDATION_ERROR", str(exc) or "Invalid request", 400)
+	except Exception as exc:
+		logger.exception("get_bridge_status failed")
+		return _api_error("INTERNAL_ERROR", f"{type(exc).__name__}: {exc}", 500)
+
+
+_BRIDGE_RELEASE_CACHE_KEY = "migration_bridge_release"
+_BRIDGE_RELEASE_REPO = "senaagents/RI-Migration"
+_BRIDGE_RELEASE_TAG_PREFIX = "bridge-v"
+_BRIDGE_RELEASE_FALLBACK = {
+	"version": None,
+	"download_url": "/assets/migration/bridge/sena_tally_bridge.zip",
+	"published_at": None,
+	"is_fallback": True,
+}
+
+
+@frappe.whitelist()
+def get_bridge_release():
+	"""Return the latest Sena Tally Bridge installer URL + version.
+
+	Hits the GitHub Releases API for ``senaagents/RI-Migration`` and looks
+	for the most recent tag matching ``bridge-v*``. The first ``.exe``
+	asset on that release is the installer. Result is cached for 5 minutes
+	in Redis so the front page doesn't burn the GitHub rate limit.
+
+	If GitHub is unreachable or the response shape changes, falls back to
+	the static zip already shipped via ``/assets/migration/bridge/`` so
+	the Download button is never fully dead. ``is_fallback`` tells the
+	frontend whether to show the version banner / update prompt.
+	"""
+	try:
+		_require_integration_user()
+
+		cached = frappe.cache.get_value(_BRIDGE_RELEASE_CACHE_KEY)
+		if cached:
+			return _api_ok(message="Bridge release fetched", data=cached)
+
+		import urllib.request
+
+		req = urllib.request.Request(
+			f"https://api.github.com/repos/{_BRIDGE_RELEASE_REPO}/releases/latest",
+			headers={
+				"Accept": "application/vnd.github+json",
+				"User-Agent": "sena-migration",
+			},
+		)
+		try:
+			with urllib.request.urlopen(req, timeout=5) as resp:
+				body = json.loads(resp.read().decode("utf-8"))
+		except Exception:
+			logger.warning("get_bridge_release: GitHub API unreachable, returning fallback")
+			return _api_ok(message="Fallback release", data=_BRIDGE_RELEASE_FALLBACK)
+
+		tag = body.get("tag_name", "") or ""
+		if not tag.startswith(_BRIDGE_RELEASE_TAG_PREFIX):
+			return _api_ok(message="Fallback release", data=_BRIDGE_RELEASE_FALLBACK)
+
+		installer = next(
+			(a for a in body.get("assets") or [] if (a.get("name") or "").endswith(".exe")),
+			None,
+		)
+		if not installer or not installer.get("browser_download_url"):
+			return _api_ok(message="Fallback release", data=_BRIDGE_RELEASE_FALLBACK)
+
+		release = {
+			"version": tag[len(_BRIDGE_RELEASE_TAG_PREFIX):],
+			"download_url": installer["browser_download_url"],
+			"published_at": body.get("published_at"),
+			"is_fallback": False,
+		}
+		frappe.cache.set_value(_BRIDGE_RELEASE_CACHE_KEY, release, expires_in_sec=300)
+		return _api_ok(message="Bridge release fetched", data=release)
+	except frappe.PermissionError as exc:
+		return _api_error("PERMISSION_DENIED", str(exc) or "Not permitted", 403)
+	except Exception as exc:
+		logger.exception("get_bridge_release failed")
+		return _api_error("INTERNAL_ERROR", f"{type(exc).__name__}: {exc}", 500)

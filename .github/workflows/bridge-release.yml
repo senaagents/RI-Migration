@@ -1,0 +1,105 @@
+name: Bridge release
+
+# Triggered when a bridge-v* tag is pushed (e.g. `bridge-v0.1.0`).
+# Builds SenaTallyBridge.exe with PyInstaller, wraps it in an Inno Setup
+# installer, and publishes both as assets on a GitHub Release.
+#
+# Code-signing is intentionally unwired right now. When a cert is on hand,
+# add a `sign` step between `Build installer` and `Publish release` —
+# Inno Setup's SignTool directive in installer.iss is already commented in.
+
+on:
+  push:
+    tags:
+      - 'bridge-v*'
+
+permissions:
+  contents: write  # needed to create a Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version from tag
+        id: ver
+        shell: bash
+        run: |
+          # Tag looks like 'bridge-v0.1.2' → version '0.1.2'
+          tag="${GITHUB_REF##*/}"
+          version="${tag#bridge-v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid bridge tag: $tag (expected bridge-vX.Y.Z)" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          # PyInstaller pinned to a known-good range; bumping requires a
+          # full smoke install on a clean Windows VM (the bootloader is
+          # stable across patch releases but has broken UX in major bumps).
+          pip install "pyinstaller>=6.5,<7"
+
+      - name: Patch version into all the places
+        shell: bash
+        run: python bridge/build/bump_version.py "${{ steps.ver.outputs.version }}"
+
+      - name: Build SenaTallyBridge.exe
+        shell: pwsh
+        run: |
+          pyinstaller bridge/build/sena_tally_bridge.spec --noconfirm
+          if (-not (Test-Path "dist/SenaTallyBridge.exe")) {
+            throw "PyInstaller did not produce dist/SenaTallyBridge.exe"
+          }
+
+      - name: Install Inno Setup
+        run: choco install innosetup --version=6.2.2 -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-installer | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" bridge/build/installer.iss
+          $expected = "dist-installer/SenaTallyBridge-Setup-${{ steps.ver.outputs.version }}.exe"
+          if (-not (Test-Path $expected)) {
+            Get-ChildItem dist-installer
+            throw "Inno Setup did not produce $expected"
+          }
+
+      # NOTE: Code-signing slot. Uncomment + configure when an Authenticode
+      # cert is available. The cert + password should be repo secrets, NEVER
+      # committed. Inno Setup's SignTool directive in installer.iss covers
+      # the inner exe at compile time once the SignTool is registered.
+      #
+      # - name: Sign installer
+      #   shell: pwsh
+      #   env:
+      #     CERT_BASE64: ${{ secrets.CODE_SIGN_CERT_BASE64 }}
+      #     CERT_PASSWORD: ${{ secrets.CODE_SIGN_CERT_PASSWORD }}
+      #   run: |
+      #     [IO.File]::WriteAllBytes("$env:TEMP\cert.pfx", [Convert]::FromBase64String($env:CERT_BASE64))
+      #     & signtool sign /f "$env:TEMP\cert.pfx" /p "$env:CERT_PASSWORD" `
+      #       /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 `
+      #       "dist-installer/SenaTallyBridge-Setup-${{ steps.ver.outputs.version }}.exe"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" `
+            "dist-installer/SenaTallyBridge-Setup-${{ steps.ver.outputs.version }}.exe" `
+            --title "Sena Tally Bridge ${{ steps.ver.outputs.version }}" `
+            --notes "Auto-generated release. See bridge/CHANGELOG.md (TODO) for details." `
+            --latest
