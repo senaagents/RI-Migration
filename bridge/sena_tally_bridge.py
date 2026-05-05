@@ -34,7 +34,7 @@ from tempfile import TemporaryDirectory
 from typing import Iterable
 
 
-__version__ = "0.2.7"
+__version__ = "0.2.8"
 
 # PyInstaller's `--windowed` / `console=False` exe runs without an attached
 # console: `sys.stdout` exists but every write to it raises
@@ -570,45 +570,64 @@ def parse_tally_ini_data_paths(ini_path: Path) -> list[Path]:
 
 
 def discover_tally_data_roots(config: BridgeConfig) -> list[Path]:
+	t_total = time.monotonic()
 	candidates = []
 	configured = getattr(config, "tally_data_dir", "") or ""
 	if configured:
-		candidates.append(Path(configured))
+		candidates.append(("configured", Path(configured)))
 	for env_name in ("TALLY_DATA_DIR", "TALLYPRIME_DATA"):
 		if os.environ.get(env_name):
-			candidates.append(Path(os.environ[env_name]))
+			candidates.append((f"env:{env_name}", Path(os.environ[env_name])))
+	t_ini = time.monotonic()
 	for ini_path in tally_ini_locations():
-		candidates.extend(parse_tally_ini_data_paths(ini_path))
+		t_one = time.monotonic()
+		parsed = parse_tally_ini_data_paths(ini_path)
+		dt_one = time.monotonic() - t_one
+		if parsed or dt_one > 0.05:
+			log(f"[scan]     ini probe {ini_path}: {len(parsed)} path(s) ({dt_one:.2f}s)")
+		for p in parsed:
+			candidates.append((f"ini:{ini_path.name}", p))
+	log(f"[scan]   tally.ini scan total: {time.monotonic() - t_ini:.2f}s")
+
 	local = os.environ.get("LOCALAPPDATA")
 	roaming = os.environ.get("APPDATA")
 	userprofile = os.environ.get("USERPROFILE")
 	if local:
-		candidates.extend([
-			Path(local) / "TallyPrime" / "Data",
-			Path(local) / "Tally" / "Data",
-		])
+		candidates.append(("LOCALAPPDATA/TallyPrime/Data", Path(local) / "TallyPrime" / "Data"))
+		candidates.append(("LOCALAPPDATA/Tally/Data", Path(local) / "Tally" / "Data"))
 	if roaming:
-		candidates.extend([
-			Path(roaming) / "TallyPrime" / "Data",
-			Path(roaming) / "Tally" / "Data",
-		])
+		candidates.append(("APPDATA/TallyPrime/Data", Path(roaming) / "TallyPrime" / "Data"))
+		candidates.append(("APPDATA/Tally/Data", Path(roaming) / "Tally" / "Data"))
 	if userprofile:
-		candidates.extend([
-			Path(userprofile) / "Documents" / "TallyPrime" / "Data",
-			Path(userprofile) / "Documents" / "Tally" / "Data",
-		])
+		candidates.append(("USERPROFILE/Documents/TallyPrime/Data", Path(userprofile) / "Documents" / "TallyPrime" / "Data"))
+		candidates.append(("USERPROFILE/Documents/Tally/Data", Path(userprofile) / "Documents" / "Tally" / "Data"))
 
 	seen = set()
 	roots = []
-	for candidate in candidates:
+	for label, candidate in candidates:
+		t_c = time.monotonic()
 		try:
 			resolved = candidate.expanduser().resolve()
 		except Exception:
+			log(f"[scan]     candidate {label} resolve failed ({time.monotonic() - t_c:.2f}s)")
 			continue
-		if resolved in seen or not resolved.exists() or not resolved.is_dir():
+		t_after_resolve = time.monotonic()
+		if resolved in seen:
+			continue
+		exists = resolved.exists()
+		is_dir = exists and resolved.is_dir()
+		dt_total = time.monotonic() - t_c
+		if dt_total > 0.05:
+			log(
+				f"[scan]     candidate {label}: resolve={t_after_resolve - t_c:.2f}s "
+				f"stat={time.monotonic() - t_after_resolve:.2f}s exists={exists} "
+				f"path={resolved}"
+			)
+		if not exists or not is_dir:
 			continue
 		seen.add(resolved)
 		roots.append(resolved)
+	log(f"[scan]   discover_tally_data_roots total: {time.monotonic() - t_total:.2f}s, {len(roots)} root(s)")
 	return roots
 
 
