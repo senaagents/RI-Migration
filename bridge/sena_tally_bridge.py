@@ -20,6 +20,7 @@ from html import escape
 import json
 import os
 import re
+import socket
 import sqlite3
 import sys
 import time
@@ -34,7 +35,7 @@ from tempfile import TemporaryDirectory
 from typing import Iterable
 
 
-__version__ = "0.2.8"
+__version__ = "0.2.9"
 
 # PyInstaller's `--windowed` / `console=False` exe runs without an attached
 # console: `sys.stdout` exists but every write to it raises
@@ -569,6 +570,36 @@ def parse_tally_ini_data_paths(ini_path: Path) -> list[Path]:
 	return paths
 
 
+_UNC_HOST_CACHE: dict[str, bool] = {}
+
+
+def _unc_host_reachable(path_str: str, timeout: float = 0.8) -> bool:
+	"""For UNC paths (\\\\server\\share\\...), confirm the host accepts SMB
+	before letting Path.resolve()/exists() touch it. A stale UNC entry in
+	tally.ini (e.g. an ex-fileserver) makes Path.resolve block ~2.7s while
+	Windows times out the SMB session setup. Non-UNC paths are passed
+	through unchanged. Results are cached for the process lifetime so we
+	don't pay the timeout twice for the same dead host.
+	"""
+	if not path_str.startswith("\\\\"):
+		return True
+	parts = path_str[2:].split("\\", 1)
+	host = parts[0] if parts else ""
+	if not host:
+		return False
+	cached = _UNC_HOST_CACHE.get(host)
+	if cached is not None:
+		return cached
+	reachable = False
+	try:
+		with socket.create_connection((host, 445), timeout=timeout):
+			reachable = True
+	except (OSError, socket.timeout):
+		reachable = False
+	_UNC_HOST_CACHE[host] = reachable
+	return reachable
+
+
 def discover_tally_data_roots(config: BridgeConfig) -> list[Path]:
 	t_total = time.monotonic()
 	candidates = []
@@ -606,6 +637,10 @@ def discover_tally_data_roots(config: BridgeConfig) -> list[Path]:
 	roots = []
 	for label, candidate in candidates:
 		t_c = time.monotonic()
+		candidate_str = str(candidate)
+		if not _unc_host_reachable(candidate_str):
+			log(f"[scan]     candidate {label}: UNC host unreachable, skipping {candidate_str}")
+			continue
 		try:
 			resolved = candidate.expanduser().resolve()
 		except Exception:
@@ -1396,11 +1431,23 @@ def handle_bridge_command(config: BridgeConfig, connection_id: str, bridge_token
 			new_dir = str(command.get("data_dir") or "").strip()
 			persist_data_dir(config, new_dir)
 			roots = [str(p) for p in discover_tally_data_roots(config)]
+			log(f"Updated tally_data_dir to {config.tally_data_dir!r} ({len(roots)} root(s) now visible)")
+			# Saving a folder path is always followed by wanting to see what's in
+			# it — run discovery + baseline immediately so the UI doesn't make
+			# the user click "Scan companies" as a separate step.
+			log("Auto-discovering Tally .1800 companies after data dir update...")
+			companies = discover_1800_companies(config)
+			if companies:
+				ingest_objects(config, connection_id, bridge_token, discovery_objects(companies))
 			ack_bridge_command(
 				config, connection_id, bridge_token, command_id, "Success",
-				{"configured_data_dir": config.tally_data_dir, "discovered_roots": roots},
+				{
+					"configured_data_dir": config.tally_data_dir,
+					"discovered_roots": roots,
+					"companies": len(companies),
+				},
 			)
-			log(f"Updated tally_data_dir to {config.tally_data_dir!r} ({len(roots)} root(s) now visible)")
+			log(f"Auto-discovery: {len(companies)} companies after set_data_dir.")
 			return
 		ack_bridge_command(config, connection_id, bridge_token, command_id, "Error", error=f"Unknown command type: {command_type}")
 	except Exception as exc:
