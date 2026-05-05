@@ -34,7 +34,7 @@ from tempfile import TemporaryDirectory
 from typing import Iterable
 
 
-__version__ = "0.2.6"
+__version__ = "0.2.7"
 
 # PyInstaller's `--windowed` / `console=False` exe runs without an attached
 # console: `sys.stdout` exists but every write to it raises
@@ -735,28 +735,45 @@ def fetch_company_baseline(config: BridgeConfig, company_name: str) -> dict:
 
 def discover_1800_companies(config: BridgeConfig) -> list[dict]:
 	companies = []
+	t_start = time.monotonic()
+	log("[scan] discover_1800_companies: start")
 	# Resolve the company currently loaded in Tally so we know which discovered
 	# folder, if any, should be enriched with reconciliation baseline metrics.
 	# Companies on disk that aren't loaded in Tally get the file metadata only.
+	t0 = time.monotonic()
 	try:
 		loaded_company = get_company_name(config)
 	except Exception:
 		loaded_company = ""
-	for root in discover_tally_data_roots(config):
-		for child in sorted(root.iterdir()):
+	log(f"[scan]   get_company_name -> {loaded_company!r} ({time.monotonic() - t0:.2f}s)")
+
+	t0 = time.monotonic()
+	roots = discover_tally_data_roots(config)
+	log(f"[scan]   discover_tally_data_roots -> {len(roots)} root(s) ({time.monotonic() - t0:.2f}s)")
+
+	for root in roots:
+		t_root = time.monotonic()
+		entries = sorted(root.iterdir()) if root.exists() else []
+		log(f"[scan]   root {root}: {len(entries)} entries ({time.monotonic() - t_root:.2f}s)")
+		for child in entries:
 			if not child.is_dir():
 				continue
+			t_child = time.monotonic()
 			files = list(child.glob("*.1800"))
 			if not files:
 				continue
-			size = sum(path.stat().st_size for path in files if path.exists())
+			t_name = time.monotonic()
+			company_name = quick_company_name(child)
+			t_after_name = time.monotonic()
+			log(
+				f"[scan]     {child.name}: glob={t_name - t_child:.2f}s "
+				f"name={t_after_name - t_name:.2f}s -> {company_name!r}"
+			)
 			company = {
 				"company_id": child.name,
-				"company_name": quick_company_name(child),
+				"company_name": company_name,
 				"folder": str(child),
 				"root": str(root),
-				"file_count": len(files),
-				"total_bytes": size,
 				"has_company": (child / "Company.1800").exists(),
 				"has_manager": (child / "Manager.1800").exists(),
 				"has_tranmgr": (child / "TranMgr.1800").exists(),
@@ -764,9 +781,12 @@ def discover_1800_companies(config: BridgeConfig) -> list[dict]:
 			# Baseline only meaningful for the loaded Tally company — querying
 			# others returns empty data and burns scan time.
 			if loaded_company and company["company_name"] == loaded_company:
-				log(f"Fetching reconciliation baseline for {loaded_company}...")
+				t_base = time.monotonic()
+				log(f"[scan]     fetching baseline for {loaded_company!r}...")
 				company.update(fetch_company_baseline(config, loaded_company))
+				log(f"[scan]     baseline complete ({time.monotonic() - t_base:.2f}s)")
 			companies.append(company)
+	log(f"[scan] discover_1800_companies: done in {time.monotonic() - t_start:.2f}s ({len(companies)} companies)")
 	return companies
 
 
