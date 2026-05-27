@@ -33,9 +33,31 @@ $PythonCmd = $Python.Source
 $InstallDir = Join-Path $env:LOCALAPPDATA "SenaTallyBridge"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
-$BridgeSource = Join-Path $PSScriptRoot "sena_tally_bridge.py"
+$BridgeFiles = @(
+  "sena_tally_bridge.py",
+  "tally_decode_path.py",
+  "tally_http_path.py",
+  "tally_http_pool.py"
+)
+foreach ($File in $BridgeFiles) {
+  $Source = Join-Path $PSScriptRoot $File
+  if (-not (Test-Path $Source)) {
+    throw "Required bridge file not found: $Source"
+  }
+  Copy-Item $Source (Join-Path $InstallDir $File) -Force
+}
+
+$DecoderSource = Join-Path $PSScriptRoot "tally1800"
+$DecoderTarget = Join-Path $InstallDir "tally1800"
+if (-not (Test-Path $DecoderSource)) {
+  throw "Required decoder package not found: $DecoderSource"
+}
+if (Test-Path $DecoderTarget) {
+  Remove-Item $DecoderTarget -Recurse -Force
+}
+Copy-Item $DecoderSource $DecoderTarget -Recurse -Force
+
 $BridgeTarget = Join-Path $InstallDir "sena_tally_bridge.py"
-Copy-Item $BridgeSource $BridgeTarget -Force
 
 $Config = @{
   server = $Server
@@ -50,8 +72,7 @@ $Config | ConvertTo-Json | Set-Content -Path $ConfigPath -Encoding UTF8
 $RunScript = Join-Path $InstallDir "run-bridge.ps1"
 @"
 `$ErrorActionPreference = "Stop"
-`$Config = Get-Content "$ConfigPath" | ConvertFrom-Json
-& "$PythonCmd" "$BridgeTarget" --server `$Config.server --pairing-code `$Config.pairing_code --tally-host `$Config.tally_host --tally-port `$Config.tally_port
+& "$PythonCmd" "$BridgeTarget" --config "$ConfigPath"
 "@ | Set-Content -Path $RunScript -Encoding UTF8
 
 Write-Host "Sena Tally Bridge installed at $InstallDir"
@@ -59,5 +80,5 @@ Write-Host "Config saved to $ConfigPath"
 Write-Host "Run it with: powershell -ExecutionPolicy Bypass -File `"$RunScript`""
 
 if ($RunOnce) {
-  & $PythonCmd $BridgeTarget --server $Server --pairing-code $PairingCode --tally-host $TallyHost --tally-port $TallyPort --once
+  & $PythonCmd $BridgeTarget --config $ConfigPath --once
 }
